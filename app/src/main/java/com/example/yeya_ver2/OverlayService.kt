@@ -379,9 +379,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         coroutineScope.launch {
             try {
                 val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElements)
+                Log.d(TAG, "Claude response: $claudeResponse")
                 processClaudeResponse(claudeResponse)
             } catch (e: Exception) {
                 Log.e(TAG, "Error communicating with Claude API", e)
+                val errorMessage = "죄송합니다. 지금 잠시 문제가 있어요. 다시 한 번 말씀해 주시겠어요?"
+                textToSpeech(errorMessage)
             }
         }
     }
@@ -389,24 +392,30 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun processClaudeResponse(response: String) {
         try {
             val jsonResponse = JSONObject(response)
-            val description = jsonResponse.getString("description")
-            val id = jsonResponse.getInt("id")
-            val action = jsonResponse.getString("action")
+            val description = jsonResponse.optString("description")
+            val id = jsonResponse.optInt("id", -1)
+            val action = jsonResponse.optString("action")
 
-            Log.d(TAG, "Claude description : $description")
-            Log.d(TAG, "Claude id : $id")
-            Log.d(TAG, "Claude action : $action")
+            Log.d(TAG, "Claude description: $description")
+            Log.d(TAG, "Claude id: $id")
+            Log.d(TAG, "Claude action: $action")
 
-            // Speak the description using TTS
-            textToSpeech(description)
+            if (description.isNotEmpty() && id != -1 && action.isNotEmpty()) {
+                // Speak the description using TTS
+                textToSpeech(description)
 
-            // Perform the action
-            when (action) {
-                "Click" -> performClick(id)
-                else -> Log.w(TAG, "Unknown action: $action")
+                // Perform the action
+                when (action) {
+                    "Click" -> performClick(id)
+                    else -> Log.w(TAG, "Unknown action: $action")
+                }
+            } else {
+                Log.e(TAG, "Invalid response format from Claude")
+                textToSpeech("죄송합니다. 응답을 처리하는 데 문제가 있습니다. 다시 시도해 주세요.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error processing Claude response", e)
+            textToSpeech("죄송합니다. 응답을 처리하는 데 문제가 있습니다. 다시 시도해 주세요.")
         }
     }
 
@@ -415,7 +424,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun performClick(id: Int) {
-        // Implement click action using AccessibilityService
+        Log.d(TAG, "Performing click on element with id: $id")
+        YeyaAccessibilityService.getInstance()?.performClick(id) ?: run {
+            Log.e(TAG, "YeyaAccessibilityService is not available")
+            textToSpeech("죄송합니다. 클릭 기능을 수행할 수 없습니다.")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

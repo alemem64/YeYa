@@ -1,5 +1,6 @@
 package com.example.yeya_ver2
 
+import android.util.Log
 import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
 import retrofit2.Call
@@ -8,10 +9,12 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Headers
 import retrofit2.http.POST
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object ClaudeApiClient {
-    private const val BASE_URL = "https://api.anthropic.com/v1/"
-    private const val API_KEY = "YOUR_API_KEY_HERE"
+    private const val BASE_URL = "https://api.anthropic.com/"
+    private const val API_KEY = "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"
 
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
@@ -19,6 +22,7 @@ object ClaudeApiClient {
             val request = original.newBuilder()
                 .header("x-api-key", API_KEY)
                 .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
                 .method(original.method, original.body)
                 .build()
             chain.proceed(request)
@@ -34,10 +38,24 @@ object ClaudeApiClient {
     val apiService: ClaudeApiService = retrofit.create(ClaudeApiService::class.java)
 
     suspend fun sendMessageToClaude(prompt: String, uiElements: String): String {
-        val messages = listOf(Message("human", buildPrompt(prompt, uiElements)))
-        val request = ChatCompletionRequest("claude-3-haiku-20240307", messages, 1000, 0.0)
-        val response = apiService.createChatCompletion(request)
-        return response.choices.firstOrNull()?.message?.content ?: "No response from Claude"
+        return withContext(Dispatchers.IO) {
+            try {
+                val messages = listOf(Message("user", buildPrompt(prompt, uiElements)))
+                val request = ChatCompletionRequest(
+                    model = "claude-3-haiku-20240307",
+                    messages = messages,
+                    max_tokens = 1000,
+                    temperature = 0.0,
+                    stream = false
+                )
+                val response = apiService.createChatCompletion(request)
+                val textContent = response.content.firstOrNull { it.type == "text" }?.text
+                textContent ?: "No response from Claude"
+            } catch (e: Exception) {
+                Log.e("ClaudeApiClient", "Error communicating with Claude API", e)
+                throw e
+            }
+        }
     }
 
     private fun buildPrompt(prompt: String, uiElements: String): String {
@@ -73,7 +91,7 @@ object ClaudeApiClient {
 
 interface ClaudeApiService {
     @Headers("Content-Type: application/json")
-    @POST("chat/completions")
+    @POST("v1/messages")
     suspend fun createChatCompletion(@Body request: ChatCompletionRequest): ChatCompletionResponse
 }
 
@@ -81,7 +99,8 @@ data class ChatCompletionRequest(
     val model: String,
     val messages: List<Message>,
     val max_tokens: Int,
-    val temperature: Double
+    val temperature: Double,
+    val stream: Boolean = false
 )
 
 data class Message(
@@ -91,10 +110,17 @@ data class Message(
 
 data class ChatCompletionResponse(
     val id: String,
+    val type: String,
+    val role: String,
+    val content: List<ContentItem>,
     val model: String,
-    val created: Long,
-    val usage: Usage,
-    val choices: List<Choice>
+    val stop_reason: String?,
+    val stop_sequence: String?
+)
+
+data class ContentItem(
+    val type: String,
+    val text: String
 )
 
 data class Usage(
