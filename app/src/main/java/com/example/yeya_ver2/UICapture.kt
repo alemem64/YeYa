@@ -21,7 +21,7 @@ object UICapture {
         val contentDescription = node.contentDescription?.toString() ?: ""
 
         // Only process nodes that have either text or content description
-        if (text.isNotEmpty() || contentDescription.isNotEmpty()) {
+        if (node.isClickable || text.isNotEmpty() || contentDescription.isNotEmpty()) {
             val element = JSONObject().apply {
                 put("id", elementId++)
                 put("class", node.className)
