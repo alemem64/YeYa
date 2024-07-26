@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
 
+<!--    업데이트-->
+
 
     <application
         android:allowBackup="true"
