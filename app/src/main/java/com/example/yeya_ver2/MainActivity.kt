@@ -8,10 +8,16 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
     private val SCREEN_CAPTURE_PERMISSION_REQUEST_CODE = 1
+    private val RECORD_AUDIO_PERMISSION_REQUEST_CODE = 2
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -20,8 +26,44 @@ class MainActivity : AppCompatActivity() {
 
         if (!Settings.canDrawOverlays(this)) {
             requestOverlayPermission()
+        } else if (!isRecordAudioPermissionGranted()) {
+            requestRecordAudioPermission()
         } else {
             startScreenCaptureIntent()
+        }
+    }
+
+    private fun isRecordAudioPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestRecordAudioPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            RECORD_AUDIO_PERMISSION_REQUEST_CODE
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            RECORD_AUDIO_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    startScreenCaptureIntent()
+                } else {
+                    Log.e(TAG, "Record audio permission denied")
+                    Toast.makeText(this, "Record audio permission is required", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
         }
     }
 
@@ -42,7 +84,11 @@ class MainActivity : AppCompatActivity() {
         when (requestCode) {
             OVERLAY_PERMISSION_REQUEST_CODE -> {
                 if (Settings.canDrawOverlays(this)) {
-                    startScreenCaptureIntent()
+                    if (!isRecordAudioPermissionGranted()) {
+                        requestRecordAudioPermission()
+                    } else {
+                        startScreenCaptureIntent()
+                    }
                 } else {
                     Log.e(TAG, "Overlay permission denied")
                     Toast.makeText(this, "Overlay permission is required", Toast.LENGTH_LONG).show()

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">yeya-ver2</string>
+    <string name="accessibility_service_description">Yeya Accessibility Service for UI capture</string>
 </resources>

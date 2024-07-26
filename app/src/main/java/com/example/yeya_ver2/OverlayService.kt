@@ -28,6 +28,15 @@ import java.util.*
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.view.MotionEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
+import org.json.JSONObject
+
+import android.accessibilityservice.AccessibilityService
+import android.view.accessibility.AccessibilityEvent
+
+import com.example.yeya_ver2.UICapture
 
 class OverlayService : Service() {
     private val TAG = "OverlayService"
@@ -43,6 +52,11 @@ class OverlayService : Service() {
 
     private lateinit var speechRecognizer: SpeechRecognizer
     private var isListening = false
+
+    private var initialX: Int = 0
+    private var initialY: Int = 0
+    private var initialTouchX: Float = 0f
+    private var initialTouchY: Float = 0f
 
     override fun onCreate() {
         super.onCreate()
@@ -92,17 +106,37 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
 
-        params.gravity = Gravity.BOTTOM or Gravity.END
+        params.gravity = Gravity.TOP or Gravity.START
         params.x = 0
         params.y = 100
 
         windowManager.addView(overlayView, params)
 
         val captureButton = overlayView.findViewById<Button>(R.id.captureButton)
-        captureButton.setOnClickListener {
-            Log.d(TAG, "Capture button clicked")
-            vibrate()
-            takeScreenshot()
+        captureButton.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initialX + (event.rawX - initialTouchX).toInt()
+                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(overlayView, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (Math.abs(event.rawX - initialTouchX) < 10 && Math.abs(event.rawY - initialTouchY) < 10) {
+                        vibrate()
+                        takeScreenshot()
+                    }
+                    true
+                }
+                else -> false
+            }
         }
     }
 
@@ -128,6 +162,7 @@ class OverlayService : Service() {
         overlayView.visibility = View.INVISIBLE
         handler.postDelayed({
             captureScreen()
+            captureUIElements()
             overlayView.visibility = View.VISIBLE
             startVoiceRecognition()
         }, 100)
@@ -135,8 +170,22 @@ class OverlayService : Service() {
 
     private fun captureScreen() {
         val metrics = resources.displayMetrics
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val width: Int
+        val height: Int
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            width = bounds.width()
+            height = bounds.height()
+        } else {
+            @Suppress("DEPRECATION")
+            width = windowManager.defaultDisplay.width
+            @Suppress("DEPRECATION")
+            height = windowManager.defaultDisplay.height
+        }
+
         val density = metrics.densityDpi
 
         var imageReader: ImageReader? = null
@@ -205,6 +254,12 @@ class OverlayService : Service() {
             Log.e(TAG, "Error saving screenshot: ${e.message}")
             e.printStackTrace()
         }
+    }
+
+    private fun captureUIElements() {
+        val uiElements = UICapture.getLatestUIElements()
+        Log.d(TAG, "Captured UI elements: $uiElements")
+        // Here you can handle the captured UI elements as needed
     }
 
     private fun createNotificationChannel() {
@@ -276,11 +331,11 @@ class OverlayService : Service() {
     private fun startVoiceRecognition() {
         Log.d(TAG, "Starting voice recognition")
         if (!isListening) {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
-            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
             try {
                 speechRecognizer.startListening(intent)
                 isListening = true
