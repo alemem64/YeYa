@@ -38,6 +38,10 @@ import android.view.accessibility.AccessibilityEvent
 
 import com.example.yeya_ver2.UICapture
 
+import kotlinx.coroutines.*
+
+
+
 class OverlayService : Service() {
     private val TAG = "OverlayService"
     private lateinit var windowManager: WindowManager
@@ -57,6 +61,9 @@ class OverlayService : Service() {
     private var initialY: Int = 0
     private var initialTouchX: Float = 0f
     private var initialTouchY: Float = 0f
+    private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
+
+
 
     override fun onCreate() {
         super.onCreate()
@@ -316,8 +323,7 @@ class OverlayService : Service() {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
                     val recognizedText = matches[0]
-                    Log.d(TAG, "Recognized text: $recognizedText")
-                    // Here you can handle the recognized text
+                    handleSpeechResult(recognizedText)
                 } else {
                     Log.d(TAG, "No speech recognized")
                 }
@@ -347,6 +353,48 @@ class OverlayService : Service() {
         }
     }
 
+    private fun handleSpeechResult(recognizedText: String) {
+        Log.d(TAG, "Recognized text: $recognizedText")
+        val uiElements = UICapture.getLatestUIElements()?.toString() ?: "[]"
+
+        coroutineScope.launch {
+            try {
+                val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElements)
+                processClaudeResponse(claudeResponse)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error communicating with Claude API", e)
+            }
+        }
+    }
+
+    private fun processClaudeResponse(response: String) {
+        try {
+            val jsonResponse = JSONObject(response)
+            val description = jsonResponse.getString("description")
+            val id = jsonResponse.getInt("id")
+            val action = jsonResponse.getString("action")
+
+            // Speak the description using TTS
+            textToSpeech(description)
+
+            // Perform the action
+            when (action) {
+                "Click" -> performClick(id)
+                else -> Log.w(TAG, "Unknown action: $action")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing Claude response", e)
+        }
+    }
+
+    private fun textToSpeech(text: String) {
+        // Implement TTS logic here
+    }
+
+    private fun performClick(id: Int) {
+        // Implement click action using AccessibilityService
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -356,5 +404,6 @@ class OverlayService : Service() {
         mediaProjection?.stop()
         virtualDisplay?.release()
         speechRecognizer.destroy()
+        coroutineScope.cancel()
     }
 }
