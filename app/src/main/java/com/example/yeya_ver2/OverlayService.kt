@@ -1,0 +1,305 @@
+package com.example.yeya_ver2
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.*
+import android.util.Log
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import androidx.core.app.NotificationCompat
+import android.graphics.Bitmap
+import android.media.Image
+import android.net.Uri
+import android.os.Environment
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+
+class OverlayService : Service() {
+    private val TAG = "OverlayService"
+    private lateinit var windowManager: WindowManager
+    private lateinit var overlayView: View
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+    private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    private val CHANNEL_ID = "YeyaOverlayServiceChannel"
+    private val NOTIFICATION_ID = 1
+
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private var isListening = false
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "onCreate called")
+        createNotificationChannel()
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        setupOverlay()
+        initializeSpeechRecognizer()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand called")
+
+        // Start foreground service first
+        startForeground(NOTIFICATION_ID, createNotification())
+
+        intent?.let {
+            val resultCode = it.getIntExtra("resultCode", Activity.RESULT_CANCELED)
+            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                it.getParcelableExtra("data", Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                it.getParcelableExtra("data")
+            }
+
+            if (data != null) {
+                mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
+                Log.d(TAG, "Media projection created")
+            } else {
+                Log.e(TAG, "Failed to get media projection data")
+            }
+        }
+
+        return START_STICKY
+    }
+
+    private fun setupOverlay() {
+        Log.d(TAG, "Setting up overlay")
+        overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_layout, null)
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+
+        params.gravity = Gravity.BOTTOM or Gravity.END
+        params.x = 0
+        params.y = 100
+
+        windowManager.addView(overlayView, params)
+
+        val captureButton = overlayView.findViewById<Button>(R.id.captureButton)
+        captureButton.setOnClickListener {
+            Log.d(TAG, "Capture button clicked")
+            vibrate()
+            takeScreenshot()
+        }
+    }
+
+    private fun vibrate() {
+        Log.d(TAG, "Vibrating")
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(200)
+        }
+    }
+
+    private fun takeScreenshot() {
+        Log.d(TAG, "Taking screenshot")
+        overlayView.visibility = View.INVISIBLE
+        handler.postDelayed({
+            captureScreen()
+            overlayView.visibility = View.VISIBLE
+            startVoiceRecognition()
+        }, 100)
+    }
+
+    private fun captureScreen() {
+        val metrics = resources.displayMetrics
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        val density = metrics.densityDpi
+
+        var imageReader: ImageReader? = null
+
+        try {
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            mediaProjection?.let { projection ->
+                virtualDisplay = projection.createVirtualDisplay(
+                    "ScreenCapture",
+                    width, height, density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader?.surface, null, null
+                )
+
+                imageReader?.setOnImageAvailableListener({ reader ->
+                    val image: Image? = reader.acquireLatestImage()
+                    image?.let {
+                        val planes = it.planes
+                        val buffer = planes[0].buffer
+                        val pixelStride = planes[0].pixelStride
+                        val rowStride = planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * width
+
+                        val bitmap = Bitmap.createBitmap(
+                            width + rowPadding / pixelStride, height,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        bitmap.copyPixelsFromBuffer(buffer)
+                        saveBitmapToGallery(bitmap)
+                        it.close()
+                    }
+                    virtualDisplay?.release()
+                    imageReader?.close()
+                }, handler)
+
+            } ?: run {
+                Log.e(TAG, "Error: MediaProjection is null")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in captureScreen: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    private fun saveBitmapToGallery(bitmap: Bitmap) {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val imageFileName = "YEYA_Screenshot_$timeStamp.jpg"
+        val storageDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "yeya")
+
+        if (!storageDir.exists()) {
+            storageDir.mkdirs()
+        }
+
+        val imageFile = File(storageDir, imageFileName)
+
+        try {
+            FileOutputStream(imageFile).use { fos ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+            }
+            Log.d(TAG, "Screenshot saved: ${imageFile.absolutePath}")
+            // Notify the media scanner about the new file
+            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            mediaScanIntent.data = Uri.fromFile(imageFile)
+            sendBroadcast(mediaScanIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving screenshot: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "Yeya Overlay Service Channel",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Yeya Overlay Service")
+            .setContentText("Running")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(pendingIntent)
+            .build()
+    }
+
+    private fun initializeSpeechRecognizer() {
+        Log.d(TAG, "Initializing SpeechRecognizer")
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.e(TAG, "Speech recognition is not available on this device")
+            return
+        }
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                Log.d(TAG, "Ready for speech")
+            }
+            override fun onBeginningOfSpeech() {
+                Log.d(TAG, "Speech begun")
+            }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                Log.d(TAG, "Speech ended")
+            }
+            override fun onError(error: Int) {
+                Log.e(TAG, "Error in speech recognition: $error")
+                isListening = false
+            }
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val recognizedText = matches[0]
+                    Log.d(TAG, "Recognized text: $recognizedText")
+                    // Here you can handle the recognized text
+                } else {
+                    Log.d(TAG, "No speech recognized")
+                }
+                isListening = false
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun startVoiceRecognition() {
+        Log.d(TAG, "Starting voice recognition")
+        if (!isListening) {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+
+            try {
+                speechRecognizer.startListening(intent)
+                isListening = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting voice recognition", e)
+            }
+        } else {
+            Log.d(TAG, "Voice recognition already in progress")
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "onDestroy called")
+        windowManager.removeView(overlayView)
+        mediaProjection?.stop()
+        virtualDisplay?.release()
+        speechRecognizer.destroy()
+    }
+}
