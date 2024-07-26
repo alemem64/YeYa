@@ -40,9 +40,12 @@ import com.example.yeya_ver2.UICapture
 
 import kotlinx.coroutines.*
 
+import android.speech.tts.TextToSpeech
+import java.util.*
 
 
-class OverlayService : Service() {
+
+class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val TAG = "OverlayService"
     private lateinit var windowManager: WindowManager
     private lateinit var overlayView: View
@@ -63,6 +66,8 @@ class OverlayService : Service() {
     private var initialTouchY: Float = 0f
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
 
+    private lateinit var tts: TextToSpeech
+
 
 
     override fun onCreate() {
@@ -73,6 +78,20 @@ class OverlayService : Service() {
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         setupOverlay()
         initializeSpeechRecognizer()
+        tts = TextToSpeech(this, this)
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = tts.setLanguage(Locale.KOREAN)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e(TAG, "Korean language is not supported for TTS")
+            } else {
+                Log.d(TAG, "TTS initialized successfully")
+            }
+        } else {
+            Log.e(TAG, "TTS initialization failed")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -374,6 +393,10 @@ class OverlayService : Service() {
             val id = jsonResponse.getInt("id")
             val action = jsonResponse.getString("action")
 
+            Log.d(TAG, "Claude description : $description")
+            Log.d(TAG, "Claude id : $id")
+            Log.d(TAG, "Claude action : $action")
+
             // Speak the description using TTS
             textToSpeech(description)
 
@@ -388,7 +411,7 @@ class OverlayService : Service() {
     }
 
     private fun textToSpeech(text: String) {
-        // Implement TTS logic here
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "")
     }
 
     private fun performClick(id: Int) {
@@ -405,5 +428,7 @@ class OverlayService : Service() {
         virtualDisplay?.release()
         speechRecognizer.destroy()
         coroutineScope.cancel()
+        tts.stop()
+        tts.shutdown()
     }
 }
