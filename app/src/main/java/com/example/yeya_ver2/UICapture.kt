@@ -16,6 +16,7 @@ object UICapture {
         elementId = 0  // Reset elementId before processing
         processNode(rootNode, elements)
         latestUIElements = elements
+        Log.d(TAG, "Total UI elements captured: ${elements.length()}")
     }
 
     private fun processNode(node: AccessibilityNodeInfo, elements: JSONArray) {
@@ -32,6 +33,9 @@ object UICapture {
                 put("isClickable", node.isClickable)
             }
             elements.put(element)
+
+            // Log each captured UI element
+            Log.d(TAG, "Captured UI element: $element")
         }
 
         // Process child nodes

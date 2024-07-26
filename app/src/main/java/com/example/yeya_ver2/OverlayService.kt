@@ -283,9 +283,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun captureUIElements() {
+        Log.d(TAG, "Starting UI element capture")
         val uiElements = UICapture.getLatestUIElements()
-        Log.d(TAG, "Captured UI elements: $uiElements")
-        // Here you can handle the captured UI elements as needed
+        if (uiElements != null) {
+            Log.d(TAG, "UI elements captured successfully. Total elements: ${uiElements.length()}")
+        } else {
+            Log.e(TAG, "Failed to capture UI elements")
+        }
     }
 
     private fun createNotificationChannel() {
@@ -374,11 +378,17 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun handleSpeechResult(recognizedText: String) {
         Log.d(TAG, "Recognized text: $recognizedText")
-        val uiElements = UICapture.getLatestUIElements()?.toString() ?: "[]"
+        val uiElements = UICapture.getLatestUIElements()
+        if (uiElements != null) {
+            Log.d(TAG, "Using captured UI elements. Total elements: ${uiElements.length()}")
+        } else {
+            Log.w(TAG, "No UI elements captured. Using empty array.")
+        }
+        val uiElementsString = uiElements?.toString() ?: "[]"
 
         coroutineScope.launch {
             try {
-                val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElements)
+                val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElementsString)
                 Log.d(TAG, "Claude response: $claudeResponse")
                 processClaudeResponse(claudeResponse)
             } catch (e: Exception) {
