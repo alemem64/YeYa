@@ -1,10 +1,12 @@
 package com.example.yeya_ver2
 
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
 object UICapture {
+    private const val TAG = "UICapture"
     private var latestUIElements: JSONArray? = null
     private var elementId = 0
 

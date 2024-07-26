@@ -30,7 +30,14 @@ class YeyaAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // We don't need to implement this for now
+        event?.let {
+            when (it.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                    UICapture.captureUIElements(rootInActiveWindow)
+                }
+            }
+        }
     }
 
     override fun onInterrupt() {
