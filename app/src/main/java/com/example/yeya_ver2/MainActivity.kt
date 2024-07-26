@@ -9,7 +9,10 @@ import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.Context
 import android.content.pm.PackageManager
+import android.view.accessibility.AccessibilityManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
@@ -24,13 +27,25 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         Log.d(TAG, "onCreate called")
 
-        if (!Settings.canDrawOverlays(this)) {
+        checkAndRequestPermissions()
+    }
+
+    private fun checkAndRequestPermissions() {
+        if (!isAccessibilityServiceEnabled()) {
+            requestAccessibilityService()
+        } else if (!Settings.canDrawOverlays(this)) {
             requestOverlayPermission()
         } else if (!isRecordAudioPermissionGranted()) {
             requestRecordAudioPermission()
         } else {
             startScreenCaptureIntent()
         }
+    }
+
+    private fun requestAccessibilityService() {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        startActivityForResult(intent, ACCESSIBILITY_SETTINGS_REQUEST_CODE)
+        Toast.makeText(this, "Please enable Yeya Accessibility Service", Toast.LENGTH_LONG).show()
     }
 
     private fun isRecordAudioPermissionGranted(): Boolean {
@@ -82,13 +97,17 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
+            ACCESSIBILITY_SETTINGS_REQUEST_CODE -> {
+                if (isAccessibilityServiceEnabled()) {
+                    checkAndRequestPermissions()
+                } else {
+                    Toast.makeText(this, "Accessibility service is required", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
             OVERLAY_PERMISSION_REQUEST_CODE -> {
                 if (Settings.canDrawOverlays(this)) {
-                    if (!isRecordAudioPermissionGranted()) {
-                        requestRecordAudioPermission()
-                    } else {
-                        startScreenCaptureIntent()
-                    }
+                    checkAndRequestPermissions()
                 } else {
                     Log.e(TAG, "Overlay permission denied")
                     Toast.makeText(this, "Overlay permission is required", Toast.LENGTH_LONG).show()
@@ -118,7 +137,17 @@ class MainActivity : AppCompatActivity() {
         finish()
     }
 
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val accessibilityManager = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(
+            AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        return enabledServices.any { it.id == "$packageName/.YeyaAccessibilityService" }
+    }
+
+
+
     companion object {
         private const val OVERLAY_PERMISSION_REQUEST_CODE = 0
+        private const val ACCESSIBILITY_SETTINGS_REQUEST_CODE = 3
     }
 }

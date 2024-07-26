@@ -6,30 +6,38 @@ import org.json.JSONObject
 
 object UICapture {
     private var latestUIElements: JSONArray? = null
+    private var elementId = 0
 
     fun captureUIElements(rootNode: AccessibilityNodeInfo?) {
         rootNode ?: return
         val elements = JSONArray()
+        elementId = 0  // Reset elementId before processing
+        processNode(rootNode, elements)
+        latestUIElements = elements
+    }
 
-        fun processNode(node: AccessibilityNodeInfo) {
-            if (node.isClickable || (!node.text.isNullOrEmpty() || !node.contentDescription.isNullOrEmpty())) {
-                val element = JSONObject().apply {
-                    put("id", node.viewIdResourceName ?: "")
-                    put("class", node.className)
-                    put("text", node.text ?: "")
-                    put("contentDescription", node.contentDescription ?: "")
-                    put("clickable", node.isClickable)
-                }
-                elements.put(element)
-            }
+    private fun processNode(node: AccessibilityNodeInfo, elements: JSONArray) {
+        val text = node.text?.toString() ?: ""
+        val contentDescription = node.contentDescription?.toString() ?: ""
 
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { processNode(it) }
+        // Only process nodes that have either text or content description
+        if (text.isNotEmpty() || contentDescription.isNotEmpty()) {
+            val element = JSONObject().apply {
+                put("id", elementId++)
+                put("class", node.className)
+                put("text", text)
+                put("contentDescription", contentDescription)
+                put("isClickable", node.isClickable)
             }
+            elements.put(element)
         }
 
-        processNode(rootNode)
-        latestUIElements = elements
+        // Process child nodes
+        for (i in 0 until node.childCount) {
+            val childNode = node.getChild(i) ?: continue
+            processNode(childNode, elements)
+            childNode.recycle()
+        }
     }
 
     fun getLatestUIElements(): JSONArray? {
