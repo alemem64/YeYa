@@ -55,29 +55,63 @@ class YeyaAccessibilityService : AccessibilityService() {
         // We don't need to implement this for now
     }
 
-    fun performClick(id: Int) {
-        Log.d(TAG, "Attempting to click on element with id: $id, CaptureID: $currentCaptureId")
+    fun performClick(targetId: Int) {
+        Log.d(TAG, "Attempting to click on element with id: $targetId, CaptureID: $currentCaptureId")
         val rootNode = rootInActiveWindow ?: return
-        val targetNode = findNodeById(rootNode, id)
-        targetNode?.let {
-            val clickResult = it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.d(TAG, "Click performed on element with id $id, CaptureID: $currentCaptureId, result: $clickResult")
-        } ?: Log.e(TAG, "Target node with id $id not found for CaptureID: $currentCaptureId")
+        findAndClickTargetNode(rootNode, targetId)
     }
 
-    private fun findNodeById(node: AccessibilityNodeInfo, targetId: Int): AccessibilityNodeInfo? {
-        Log.d(TAG, "findNodeById: Searching for id $targetId in CaptureID-$currentCaptureId")
-        if (node.viewIdResourceName?.endsWith("/$targetId") == true) {
-            Log.d(TAG, "findNodeById: Found node with id $targetId in CaptureID-$currentCaptureId")
-            return node
-        }
-        for (i in 0 until node.childCount) {
-            val childNode = node.getChild(i)
-            val result = findNodeById(childNode, targetId)
-            if (result != null) {
-                return result
+    private fun findAndClickTargetNode(rootNode: AccessibilityNodeInfo, targetId: Int) {
+        var currentId = 0
+        processNode(rootNode, targetId, currentId)
+    }
+
+    private fun processNode(node: AccessibilityNodeInfo, targetId: Int, currentId: Int): Int {
+        var updatedId = currentId
+        val text = node.text?.toString() ?: ""
+        val contentDescription = node.contentDescription?.toString() ?: ""
+
+        if (node.isClickable || text.isNotEmpty() || contentDescription.isNotEmpty()) {
+            Log.d(TAG, "Founding target -> id : $updatedId, text : $text contentDescription : $contentDescription, isClickable: ${node.isClickable}")
+
+            if (updatedId == targetId) {
+                Log.d(TAG, "Found target node with id $targetId")
+                Log.d(TAG, "Found target node's text: $text")
+                Log.d(TAG, "Found target node's contentDescription: $contentDescription")
+                Log.d(TAG, "Found target node's isClickable: ${node.isClickable}")
+
+                val clickResult = if (node.isClickable) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                } else {
+                    findClickableParent(node)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+                }
+
+                Log.d(TAG, "Click performed on element with id $targetId, result: $clickResult")
+                return -1  // Signal that we've found and clicked the target
             }
+            updatedId++
+        }
+
+        for (i in 0 until node.childCount) {
+            val childNode = node.getChild(i) ?: continue
+            val result = processNode(childNode, targetId, updatedId)
+            if (result == -1) return -1  // Target found and clicked, propagate the signal
+            updatedId = result
             childNode.recycle()
+        }
+
+        return updatedId
+    }
+
+    private fun findClickableParent(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var parent = node.parent
+        while (parent != null) {
+            if (parent.isClickable) {
+                return parent
+            }
+            val newParent = parent.parent
+            parent.recycle()
+            parent = newParent
         }
         return null
     }
