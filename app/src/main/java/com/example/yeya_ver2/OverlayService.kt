@@ -380,15 +380,15 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         Log.d(TAG, "Recognized text: $recognizedText")
         val uiElements = UICapture.getLatestUIElements()
         if (uiElements != null) {
-            Log.d(TAG, "Using captured UI elements. Total elements: ${uiElements.length()}")
+            Log.d(TAG, "Using captured UI elements. CaptureID: ${uiElements.optInt("captureID")}")
         } else {
-            Log.w(TAG, "No UI elements captured. Using empty array.")
+            Log.w(TAG, "No UI elements captured. Using empty object.")
         }
-        val uiElementsString = uiElements?.toString() ?: "[]"
 
         coroutineScope.launch {
             try {
-                val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElementsString)
+                // Use the uiElements directly, which is already a JSONObject
+                val claudeResponse = ClaudeApiClient.sendMessageToClaude(recognizedText, uiElements ?: JSONObject())
                 Log.d(TAG, "Claude response: $claudeResponse")
                 processClaudeResponse(claudeResponse)
             } catch (e: Exception) {
@@ -398,6 +398,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
         }
     }
+
 
     private fun processClaudeResponse(response: String) {
         try {

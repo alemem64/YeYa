@@ -5,9 +5,11 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONObject
 
 class YeyaAccessibilityService : AccessibilityService() {
     private val TAG = "YeyaAccessibilityService"
+    private var currentCaptureId: Int = 0
 
     companion object {
         private var instance: YeyaAccessibilityService? = null
@@ -34,7 +36,16 @@ class YeyaAccessibilityService : AccessibilityService() {
             when (it.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                    UICapture.captureUIElements(rootInActiveWindow)
+                    val capturedUI = UICapture.captureUIElements(rootInActiveWindow)
+                    if (capturedUI != null) {
+                        currentCaptureId = capturedUI.optInt("captureID", 0)
+                        Log.d(TAG, "onAccessibilityEvent: Captured UI with CaptureID-$currentCaptureId")
+                    } else {
+                        Log.d(TAG, "onAccessibilityEvent: Failed to capture UI")
+                    }
+                }
+                else -> {
+                    // Handle other event types if needed
                 }
             }
         }
@@ -45,17 +56,19 @@ class YeyaAccessibilityService : AccessibilityService() {
     }
 
     fun performClick(id: Int) {
-        Log.d(TAG, "Attempting to click on element with id: $id")
+        Log.d(TAG, "Attempting to click on element with id: $id, CaptureID: $currentCaptureId")
         val rootNode = rootInActiveWindow ?: return
         val targetNode = findNodeById(rootNode, id)
         targetNode?.let {
             val clickResult = it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.d(TAG, "Click performed on element with id $id, result: $clickResult")
-        } ?: Log.e(TAG, "Target node with id $id not found")
+            Log.d(TAG, "Click performed on element with id $id, CaptureID: $currentCaptureId, result: $clickResult")
+        } ?: Log.e(TAG, "Target node with id $id not found for CaptureID: $currentCaptureId")
     }
 
     private fun findNodeById(node: AccessibilityNodeInfo, targetId: Int): AccessibilityNodeInfo? {
+        Log.d(TAG, "findNodeById: Searching for id $targetId in CaptureID-$currentCaptureId")
         if (node.viewIdResourceName?.endsWith("/$targetId") == true) {
+            Log.d(TAG, "findNodeById: Found node with id $targetId in CaptureID-$currentCaptureId")
             return node
         }
         for (i in 0 until node.childCount) {

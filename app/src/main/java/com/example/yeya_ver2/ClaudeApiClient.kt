@@ -3,7 +3,6 @@ package com.example.yeya_ver2
 import android.util.Log
 import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
-import retrofit2.Call
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -11,6 +10,7 @@ import retrofit2.http.Headers
 import retrofit2.http.POST
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 object ClaudeApiClient {
     private const val BASE_URL = "https://api.anthropic.com/"
@@ -37,10 +37,17 @@ object ClaudeApiClient {
 
     val apiService: ClaudeApiService = retrofit.create(ClaudeApiService::class.java)
 
-    suspend fun sendMessageToClaude(prompt: String, uiElements: String): String {
+    suspend fun sendMessageToClaude(prompt: String, uiElements: JSONObject): String {
         return withContext(Dispatchers.IO) {
             try {
-                val messages = listOf(Message("user", buildPrompt(prompt, uiElements)))
+                val captureID = uiElements.getInt("captureID")
+                val capturedResult = uiElements.getJSONArray("capturedResult")
+
+                Log.d("ClaudeApiClient", "Prompt to be sent to Claude: $prompt")
+                Log.d("ClaudeApiClient", "CaptureID: $captureID")
+                Log.d("ClaudeApiClient", "UI elements to be sent to Claude: $capturedResult")
+
+                val messages = listOf(Message("user", buildPrompt(prompt, uiElements.toString())))
                 val request = ChatCompletionRequest(
                     model = "claude-3-haiku-20240307",
                     messages = messages,

@@ -7,23 +7,28 @@ import org.json.JSONObject
 
 object UICapture {
     private const val TAG = "UICapture"
-    private var latestUIElements: JSONArray? = null
+    private var latestUIElements: JSONObject? = null
     private var elementId = 0
+    private var captureId = 0
 
-    fun captureUIElements(rootNode: AccessibilityNodeInfo?) {
-        rootNode ?: return
+    fun captureUIElements(rootNode: AccessibilityNodeInfo?): JSONObject? {
+        rootNode ?: return null
         val elements = JSONArray()
-        elementId = 0  // Reset elementId before processing
+        elementId = 0
+        captureId++
         processNode(rootNode, elements)
-        latestUIElements = elements
-        Log.d(TAG, "Total UI elements captured: ${elements.length()}")
+        latestUIElements = JSONObject().apply {
+            put("captureID", captureId)
+            put("capturedResult", elements)
+        }
+        Log.d(TAG, "CaptureID-$captureId: Total UI elements captured: ${elements.length()}")
+        return latestUIElements
     }
 
     private fun processNode(node: AccessibilityNodeInfo, elements: JSONArray) {
         val text = node.text?.toString() ?: ""
         val contentDescription = node.contentDescription?.toString() ?: ""
 
-        // Only process nodes that have either text or content description
         if (node.isClickable || text.isNotEmpty() || contentDescription.isNotEmpty()) {
             val element = JSONObject().apply {
                 put("id", elementId++)
@@ -34,11 +39,9 @@ object UICapture {
             }
             elements.put(element)
 
-            // Log each captured UI element
-            Log.d(TAG, "Captured UI element: $element")
+            Log.d(TAG, "CaptureID-$captureId Captured UI element: $element")
         }
 
-        // Process child nodes
         for (i in 0 until node.childCount) {
             val childNode = node.getChild(i) ?: continue
             processNode(childNode, elements)
@@ -46,7 +49,7 @@ object UICapture {
         }
     }
 
-    fun getLatestUIElements(): JSONArray? {
+    fun getLatestUIElements(): JSONObject? {
         return latestUIElements
     }
 }
