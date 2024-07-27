@@ -40,6 +40,10 @@ object ClaudeApiClient {
     suspend fun sendMessageToClaude(prompt: String, uiElements: String): String {
         return withContext(Dispatchers.IO) {
             try {
+                // Log the prompt and UI elements before sending to Claude
+                Log.d("ClaudeApiClient", "Prompt to be sent to Claude: $prompt")
+                Log.d("ClaudeApiClient", "UI elements to be sent to Claude: $uiElements")
+
                 val messages = listOf(Message("user", buildPrompt(prompt, uiElements)))
                 val request = ChatCompletionRequest(
                     model = "claude-3-haiku-20240307",
@@ -57,6 +61,7 @@ object ClaudeApiClient {
             }
         }
     }
+
 
     private fun buildPrompt(prompt: String, uiElements: String): String {
         return """
