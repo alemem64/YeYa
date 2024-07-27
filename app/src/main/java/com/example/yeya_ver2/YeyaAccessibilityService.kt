@@ -52,7 +52,7 @@ class YeyaAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        // We don't need to implement this for now
+        // We don't need to implement this for now.
     }
 
     fun performClick(targetId: Int) {
