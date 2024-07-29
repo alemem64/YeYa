@@ -139,9 +139,23 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         windowManager.addView(overlayView, params)
 
         val captureButton = overlayView.findViewById<Button>(R.id.captureButton)
+        var longPressStartTime: Long = 0
+        var isLongPressFired = false
+        val longPressDuration = 2000L // 2 seconds in milliseconds
+
+        val longPressRunnable = Runnable {
+            if (!isLongPressFired) {
+                isLongPressFired = true
+                handleLongPress()
+            }
+        }
+
         captureButton.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    longPressStartTime = System.currentTimeMillis()
+                    isLongPressFired = false
+                    handler.postDelayed(longPressRunnable, longPressDuration)
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
@@ -149,15 +163,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(overlayView, params)
+                    if (!isLongPressFired) {
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(overlayView, params)
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (Math.abs(event.rawX - initialTouchX) < 10 && Math.abs(event.rawY - initialTouchY) < 10) {
-                        vibrate()
-                        takeScreenshot()
+                    handler.removeCallbacks(longPressRunnable)
+                    if (!isLongPressFired) {
+                        if (System.currentTimeMillis() - longPressStartTime < 200) {
+                            // Short click
+                            vibrate()
+                            takeScreenshot()
+                        }
                     }
                     true
                 }
@@ -165,6 +185,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
         }
     }
+
+    private fun handleLongPress() {
+        Log.d(TAG, "Long press detected - 2 seconds")
+        // We'll implement the screen sharing functionality here in the next steps
+    }
+
+
 
     private fun vibrate() {
         Log.d(TAG, "Vibrating")
