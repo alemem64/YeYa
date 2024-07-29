@@ -22,6 +22,7 @@ object UICapture {
             put("capturedResult", elements)
         }
         Log.d(TAG, "CaptureID-$captureId: Total UI elements captured: ${elements.length()}")
+        Log.d(TAG, "CaptureID-$captureId Captured UI element: $elements")
         return latestUIElements
     }
 
@@ -39,7 +40,8 @@ object UICapture {
             }
             elements.put(element)
 
-            Log.d(TAG, "CaptureID-$captureId Captured UI element: $element")
+//            Log.d(TAG, "CaptureID-$captureId Captured UI element: $element")
+
         }
 
         for (i in 0 until node.childCount) {
