@@ -51,6 +51,7 @@ import kotlinx.coroutines.*
 import java.net.Socket
 import java.io.PrintWriter
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -82,6 +83,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
 
     private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
+
+    private var imageReader: ImageReader? = null
+    private var screenDensity: Int = 0
+    private var screenWidth: Int = 0
+    private var screenHeight: Int = 0
 
 
 
@@ -285,7 +291,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                 if (response == "Server connected to Client") {
                     Log.d(TAG, "Successfully connected to server")
-                    startScreenSharing(socket)
+
+                    // Send startYeYaCall message
+                    out.println("startYeYaCall")
+                    Log.d(TAG, "Sent startYeYaCall message to server")
+
+                    // Start screen recording and sharing
+                    startScreenRecordingAndSharing(socket)
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                 }
@@ -297,13 +309,58 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun startScreenSharing(socket: Socket) {
-        // Implement screen recording and data sending logic here
-        // This is where you'd capture the screen and send it over the socket
-        Log.d(TAG, "Starting screen sharing")
-        // For now, we'll just log a message
+
+
+    private fun startScreenRecordingAndSharing(socket: Socket) {
+        val metrics = resources.displayMetrics
+        screenDensity = metrics.densityDpi
+        screenWidth = metrics.widthPixels
+        screenHeight = metrics.heightPixels
+
+        imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "ScreenCapture",
+            screenWidth, screenHeight, screenDensity,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface, null, null
+        )
+
+        imageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage()
+            if (image != null) {
+                sendImageToServer(image, socket)
+                image.close()
+            }
+        }, handler)
     }
 
+    private fun sendImageToServer(image: Image, socket: Socket) {
+        val planes = image.planes
+        val buffer = planes[0].buffer
+        val pixelStride = planes[0].pixelStride
+        val rowStride = planes[0].rowStride
+        val rowPadding = rowStride - pixelStride * screenWidth
+
+        val bitmap = Bitmap.createBitmap(
+            screenWidth + rowPadding / pixelStride, screenHeight,
+            Bitmap.Config.ARGB_8888
+        )
+        bitmap.copyPixelsFromBuffer(buffer)
+
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
+        val byteArray = stream.toByteArray()
+
+        try {
+            val outputStream = socket.getOutputStream()
+            outputStream.write(byteArray.size.toString().toByteArray())
+            outputStream.write("\n".toByteArray())
+            outputStream.write(byteArray)
+            outputStream.flush()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending image to server", e)
+        }
+    }
 
 
     private fun vibrate() {

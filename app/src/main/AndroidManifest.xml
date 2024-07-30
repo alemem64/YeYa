@@ -66,6 +66,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".YeYaCallService"
+            android:enabled="true"
+            android:exported="false" />
+
     </application>
 
 </manifest>

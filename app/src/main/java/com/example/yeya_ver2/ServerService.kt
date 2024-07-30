@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.io.BufferedInputStream
 import java.net.BindException
 import java.net.InetAddress
 
@@ -115,11 +116,62 @@ class ServerService : Service() {
                     Log.d("ServerService", "Received: $message")
                     writer.println("Server connected to Client")
                     Log.d("ServerService", "Sent: Server connected to Client")
+
+                    // Wait for startYeYaCall message
+                    val startYeYaCallMessage = reader.readLine()
+                    if (startYeYaCallMessage == "startYeYaCall") {
+                        Log.d("ServerService", "Received startYeYaCall message")
+                        startYeYaCallService()
+                        receiveScreenSharing(client)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("ServerService", "Error handling client", e)
             } finally {
                 client.close()
+            }
+        }
+    }
+
+    private fun startYeYaCallService() {
+        val intent = Intent(this, YeYaCallService::class.java)
+        startService(intent)
+    }
+
+    private fun receiveScreenSharing(client: Socket) {
+        coroutineScope.launch(Dispatchers.IO) {
+            val inputStream = BufferedInputStream(client.inputStream)
+            val buffer = ByteArray(1024)
+            var bytesRead: Int
+
+            while (true) {
+                try {
+                    // Read image size
+                    val sizeBuffer = StringBuilder()
+                    while (true) {
+                        bytesRead = inputStream.read(buffer, 0, 1)
+                        if (bytesRead == -1 || buffer[0] == '\n'.toByte()) break
+                        sizeBuffer.append(buffer[0].toChar())
+                    }
+                    val imageSize = sizeBuffer.toString().toInt()
+
+                    // Read image data
+                    val imageData = ByteArray(imageSize)
+                    var totalBytesRead = 0
+                    while (totalBytesRead < imageSize) {
+                        bytesRead = inputStream.read(imageData, totalBytesRead, imageSize - totalBytesRead)
+                        if (bytesRead == -1) break
+                        totalBytesRead += bytesRead
+                    }
+
+                    // Update image in YeYaCallService
+                    val intent = Intent(this@ServerService, YeYaCallService::class.java)
+                    intent.putExtra("imageData", imageData)
+                    startService(intent)
+                } catch (e: Exception) {
+                    Log.e("ServerService", "Error receiving screen sharing data", e)
+                    break
+                }
             }
         }
     }
