@@ -315,6 +315,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
+    private val imageLock = Any()
+    private var isProcessingImage = false
+
     private fun startScreenRecordingAndSharing() {
         val metrics = resources.displayMetrics
         screenDensity = metrics.densityDpi
@@ -330,9 +333,16 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         )
 
         imageReader?.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage()
-            if (image != null) {
-                sendImageToServer(image)
+            synchronized(imageLock) {
+                if (!isProcessingImage) {
+                    isProcessingImage = true
+                    val image = reader.acquireLatestImage()
+                    if (image != null) {
+                        sendImageToServer(image)
+                    } else {
+                        isProcessingImage = false
+                    }
+                }
             }
         }, handler)
     }
@@ -369,6 +379,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 Log.e(TAG, "Error sending image to server", e)
             } finally {
                 image.close()
+                synchronized(imageLock) {
+                    isProcessingImage = false
+                }
             }
         }
     }

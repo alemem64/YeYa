@@ -1,5 +1,6 @@
 package com.example.yeya_ver2
 
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
@@ -12,9 +13,25 @@ class YeYaCallActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_yeyacall)
         screenShareImageView = findViewById(R.id.screenShareImageView)
+
+        handleIntent(intent)
     }
 
-    fun updateScreenShare(imageData: ByteArray) {
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == "UPDATE_SCREEN_SHARE") {
+            val imageData = intent.getByteArrayExtra("imageData")
+            if (imageData != null) {
+                updateScreenShare(imageData)
+            }
+        }
+    }
+
+    private fun updateScreenShare(imageData: ByteArray) {
         val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
         runOnUiThread {
             screenShareImageView.setImageBitmap(bitmap)

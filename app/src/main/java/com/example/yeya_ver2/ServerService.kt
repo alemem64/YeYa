@@ -153,7 +153,7 @@ class ServerService : Service() {
 
                 while (!client.isClosed) {
                     // Read image size
-                    inputStream.read(sizeBuffer)
+                    if (inputStream.read(sizeBuffer) == -1) break
                     val imageSize = ByteBuffer.wrap(sizeBuffer).int
 
                     // Read image data
@@ -165,10 +165,13 @@ class ServerService : Service() {
                         totalBytesRead += bytesRead
                     }
 
-                    // Update image in YeYaCallService
-                    val intent = Intent(this@ServerService, YeYaCallService::class.java)
-                    intent.putExtra("imageData", imageData)
-                    startService(intent)
+                    if (totalBytesRead == imageSize) {
+                        // Update image in YeYaCallService
+                        val intent = Intent(this@ServerService, YeYaCallService::class.java)
+                        intent.action = "UPDATE_SCREEN_SHARE"
+                        intent.putExtra("imageData", imageData)
+                        startService(intent)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("ServerService", "Error in receiveScreenSharing", e)

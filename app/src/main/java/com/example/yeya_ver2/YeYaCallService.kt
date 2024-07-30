@@ -32,37 +32,44 @@ class YeYaCallService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notificationIntent = Intent(this, YeYaCallActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
+        if (intent?.action == "UPDATE_SCREEN_SHARE") {
+            updateScreenShare(intent)
+        } else {
+            val notificationIntent = Intent(this, YeYaCallActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE
+            )
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("YeYa Call")
-            .setContentText("Screen sharing in progress")
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(pendingIntent)
-            .build()
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("YeYa Call")
+                .setContentText("Screen sharing in progress")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(pendingIntent)
+                .build()
 
-        startForeground(1, notification)
+            startForeground(1, notification)
 
-        // Start YeYaCallActivity
-        val activityIntent = Intent(this, YeYaCallActivity::class.java)
-        activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(activityIntent)
+            // Start YeYaCallActivity
+            val activityIntent = Intent(this, YeYaCallActivity::class.java)
+            activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(activityIntent)
+        }
 
         return START_STICKY
     }
 
-    fun updateScreenShare(imageData: ByteArray) {
-        val intent = Intent(this, YeYaCallActivity::class.java)
-        intent.action = "UPDATE_SCREEN_SHARE"
-        intent.putExtra("imageData", imageData)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
+    fun updateScreenShare(intent: Intent) {
+        val imageData = intent.getByteArrayExtra("imageData")
+        if (imageData != null) {
+            val intent = Intent(this, YeYaCallActivity::class.java)
+            intent.action = "UPDATE_SCREEN_SHARE"
+            intent.putExtra("imageData", imageData)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        }
     }
 
 
