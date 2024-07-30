@@ -44,6 +44,7 @@ import android.speech.tts.TextToSpeech
 import java.util.*
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
@@ -225,31 +226,41 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private suspend fun discoverServer(): Pair<String, Int>? {
+    private suspend fun discoverServer(): Triple<String, Int, Int>? {
         return withContext(Dispatchers.IO) {
             val broadcastAddress = "255.255.255.255"
-            val udpPort = 8888 // Choose a port for UDP discovery
+            val UDP_DISCOVERY_PORT_START = 8888
 
             DatagramSocket().use { socket ->
                 socket.broadcast = true
-                socket.soTimeout = 5000 // 5 seconds timeout
+                socket.soTimeout = 10000 // 10 seconds timeout
 
-                val sendData = "DISCOVER_YEYA_SERVER".toByteArray()
-                val sendPacket = DatagramPacket(sendData, sendData.size, InetAddress.getByName(broadcastAddress), udpPort)
-                socket.send(sendPacket)
-
-                val receiveData = ByteArray(1024)
-                val receivePacket = DatagramPacket(receiveData, receiveData.size)
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                val multicastLock = wifiManager.createMulticastLock("multicastLock")
+                multicastLock.acquire()
 
                 try {
+                    for (port in UDP_DISCOVERY_PORT_START until UDP_DISCOVERY_PORT_START + 100) {
+                        val sendData = "DISCOVER_YEYA_SERVER".toByteArray()
+                        val sendPacket = DatagramPacket(sendData, sendData.size, InetAddress.getByName(broadcastAddress), port)
+                        socket.send(sendPacket)
+                    }
+
+                    val receiveData = ByteArray(1024)
+                    val receivePacket = DatagramPacket(receiveData, receiveData.size)
+
                     socket.receive(receivePacket)
                     val serverAddress = receivePacket.address.hostAddress
-                    val serverPort = String(receivePacket.data, 0, receivePacket.length).toInt()
-                    Log.d(TAG, "Discovered server at $serverAddress:$serverPort")
-                    Pair(serverAddress, serverPort)
+                    val response = String(receivePacket.data, 0, receivePacket.length).split(":")
+                    val serverPort = response[0].toInt()
+                    val udpPort = response[1].toInt()
+                    Log.d(TAG, "Discovered server at $serverAddress:$serverPort (UDP: $udpPort)")
+                    Triple(serverAddress, serverPort, udpPort)
                 } catch (e: SocketTimeoutException) {
                     Log.e(TAG, "No server found", e)
                     null
+                } finally {
+                    multicastLock.release()
                 }
             }
         }

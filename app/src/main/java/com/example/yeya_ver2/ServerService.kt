@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.net.BindException
 import java.net.InetAddress
 
 class ServerService : Service() {
@@ -85,9 +86,11 @@ class ServerService : Service() {
         withContext(Dispatchers.IO) {
             try {
                 serverSocket = ServerSocket(0) // 0 means the system will pick an available port
-                val port = serverSocket?.localPort
+                tcpServerPort = serverSocket?.localPort ?: 0
                 val ip = getIPAddress()
-                Log.d("ServerService", "Server started on $ip:$port")
+                Log.d("ServerService", "Server started on $ip:$tcpServerPort")
+
+                startUdpDiscoveryListener()
 
                 while (true) {
                     val client = serverSocket?.accept()
@@ -140,28 +143,47 @@ class ServerService : Service() {
         return "Unknown"
     }
 
+    private val UDP_DISCOVERY_PORT_START = 8888
+    private var udpDiscoveryPort = UDP_DISCOVERY_PORT_START
+    private var tcpServerPort: Int = 0
+
     private fun startUdpDiscoveryListener() {
         networkCoroutineScope.launch {
-            val udpPort = 8888
-            DatagramSocket(udpPort).use { socket ->
+            var socket: DatagramSocket? = null
+            while (socket == null && udpDiscoveryPort < UDP_DISCOVERY_PORT_START + 100) {
+                try {
+                    socket = DatagramSocket(udpDiscoveryPort)
+                } catch (e: BindException) {
+                    Log.w(TAG, "Port $udpDiscoveryPort is in use, trying next port")
+                    udpDiscoveryPort++
+                }
+            }
+
+            if (socket == null) {
+                Log.e(TAG, "Failed to find an available UDP port")
+                return@launch
+            }
+
+            Log.d(TAG, "UDP Discovery listener started on port $udpDiscoveryPort")
+
+            socket.use { datagramSocket ->
                 val receiveData = ByteArray(1024)
                 val receivePacket = DatagramPacket(receiveData, receiveData.size)
 
                 while (true) {
                     try {
-                        socket.receive(receivePacket)
+                        datagramSocket.receive(receivePacket)
                         val message = String(receivePacket.data, 0, receivePacket.length)
 
                         if (message == "DISCOVER_YEYA_SERVER") {
                             val clientAddress = receivePacket.address
                             val clientPort = receivePacket.port
-                            val serverPort = serverSocket?.localPort ?: continue
 
-                            val sendData = serverPort.toString().toByteArray()
+                            val sendData = "$tcpServerPort:$udpDiscoveryPort".toByteArray()
                             val sendPacket = DatagramPacket(sendData, sendData.size, clientAddress, clientPort)
-                            socket.send(sendPacket)
+                            datagramSocket.send(sendPacket)
 
-                            Log.d(TAG, "Responded to discovery request from $clientAddress:$clientPort")
+                            Log.d(TAG, "Responded to discovery request from $clientAddress:$clientPort with TCP port $tcpServerPort and UDP port $udpDiscoveryPort")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in UDP discovery listener", e)

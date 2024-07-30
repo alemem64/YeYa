@@ -17,14 +17,13 @@ import android.view.accessibility.AccessibilityManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
-
-
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
     private val SCREEN_CAPTURE_PERMISSION_REQUEST_CODE = 1
     private val RECORD_AUDIO_PERMISSION_REQUEST_CODE = 2
     private val NOTIFICATION_PERMISSION_REQUEST_CODE = 3
     private val WIFI_PERMISSION_REQUEST_CODE = 4
+    private val MULTICAST_PERMISSION_REQUEST_CODE = 5
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,15 +44,11 @@ class MainActivity : AppCompatActivity() {
             requestNotificationPermission()
         } else if (!isWifiPermissionGranted()) {
             requestWifiPermission()
+        } else if (!isMulticastPermissionGranted()) {
+            requestMulticastPermission()
         } else {
             startScreenCaptureIntent()
         }
-    }
-
-    private fun requestAccessibilityService() {
-        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-        startActivityForResult(intent, ACCESSIBILITY_SETTINGS_REQUEST_CODE)
-        Toast.makeText(this, "Please enable Yeya Accessibility Service", Toast.LENGTH_LONG).show()
     }
 
     private fun isRecordAudioPermissionGranted(): Boolean {
@@ -107,34 +102,27 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        when (requestCode) {
-            RECORD_AUDIO_PERMISSION_REQUEST_CODE -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    checkAndRequestPermissions()
-                } else {
-                    Log.e(TAG, "Record audio permission denied")
-                    Toast.makeText(this, "Record audio permission is required", Toast.LENGTH_LONG).show()
-                    finish()
-                }
-            }
-            WIFI_PERMISSION_REQUEST_CODE -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    checkAndRequestPermissions()
-                } else {
-                    Log.e(TAG, "Wi-Fi state access permission denied")
-                    Toast.makeText(this, "Wi-Fi state access permission is required for some features", Toast.LENGTH_LONG).show()
-                    // You might want to continue without this permission or finish the app
-                    startScreenCaptureIntent()
-                }
-            }
-        }
+    private fun isMulticastPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CHANGE_WIFI_MULTICAST_STATE
+        ) == PackageManager.PERMISSION_GRANTED
     }
+
+    private fun requestMulticastPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.CHANGE_WIFI_MULTICAST_STATE),
+            MULTICAST_PERMISSION_REQUEST_CODE
+        )
+    }
+
+    private fun requestAccessibilityService() {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        startActivityForResult(intent, ACCESSIBILITY_SETTINGS_REQUEST_CODE)
+        Toast.makeText(this, "Please enable Yeya Accessibility Service", Toast.LENGTH_LONG).show()
+    }
+
     private fun requestOverlayPermission() {
         Log.d(TAG, "Requesting overlay permission")
         val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
@@ -145,6 +133,28 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Starting screen capture intent")
         val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), SCREEN_CAPTURE_PERMISSION_REQUEST_CODE)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            RECORD_AUDIO_PERMISSION_REQUEST_CODE,
+            WIFI_PERMISSION_REQUEST_CODE,
+            MULTICAST_PERMISSION_REQUEST_CODE,
+            NOTIFICATION_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    checkAndRequestPermissions()
+                } else {
+                    Log.e(TAG, "Permission denied: $requestCode")
+                    Toast.makeText(this, "This permission is required for the app to function properly", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -197,11 +207,8 @@ class MainActivity : AppCompatActivity() {
         return enabledServices.any { it.id == "$packageName/.YeyaAccessibilityService" }
     }
 
-
-
     companion object {
         private const val OVERLAY_PERMISSION_REQUEST_CODE = 0
         private const val ACCESSIBILITY_SETTINGS_REQUEST_CODE = 3
     }
 }
-//.
