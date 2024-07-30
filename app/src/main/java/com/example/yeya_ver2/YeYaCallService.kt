@@ -2,6 +2,7 @@ package com.example.yeya_ver2
 
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import android.view.WindowManager
@@ -12,6 +13,7 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.net.Socket
 import android.graphics.BitmapFactory
+import android.os.Build
 
 class YeYaCallService : Service() {
     private val TAG = "YeYaCallService"
@@ -32,7 +34,11 @@ class YeYaCallService : Service() {
             .setSmallIcon(R.drawable.ic_notification)
             .build()
 
-        startForeground(2, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(2, notification)
+        }
 
         return START_STICKY
     }

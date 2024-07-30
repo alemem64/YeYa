@@ -338,35 +338,36 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun sendImageToServer(image: Image) {
-        val planes = image.planes
-        val buffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * screenWidth
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                clientSocket?.let { socket ->
+                    if (!socket.isClosed) {
+                        val planes = image.planes
+                        val buffer = planes[0].buffer
+                        val pixelStride = planes[0].pixelStride
+                        val rowStride = planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * screenWidth
 
-        val bitmap = Bitmap.createBitmap(
-            screenWidth + rowPadding / pixelStride, screenHeight,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
+                        val bitmap = Bitmap.createBitmap(
+                            screenWidth + rowPadding / pixelStride, screenHeight,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        bitmap.copyPixelsFromBuffer(buffer)
 
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
-        val byteArray = stream.toByteArray()
+                        val stream = ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
+                        val byteArray = stream.toByteArray()
 
-        try {
-            clientSocket?.let { socket ->
-                if (!socket.isClosed) {
-                    val outputStream = socket.getOutputStream()
-                    outputStream.write(byteArray.size.toString().toByteArray())
-                    outputStream.write("\n".toByteArray())
-                    outputStream.write(byteArray)
-                    outputStream.flush()
+                        val outputStream = socket.getOutputStream()
+                        outputStream.write(byteArray.size.toString().toByteArray())
+                        outputStream.write("\n".toByteArray())
+                        outputStream.write(byteArray)
+                        outputStream.flush()
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending image to server", e)
             }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error sending image to server", e)
         }
     }
 
@@ -669,6 +670,15 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         tts.stop()
         tts.shutdown()
         clientSocket?.close()
+        coroutineScope.cancel()
+        stopScreenSharing()
+    }
+
+    private fun stopScreenSharing() {
+        virtualDisplay?.release()
+        imageReader?.close()
+        clientSocket?.close()
+        clientSocket = null
     }
 
 }
