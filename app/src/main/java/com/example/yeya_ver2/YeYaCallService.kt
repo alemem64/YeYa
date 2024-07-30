@@ -33,7 +33,10 @@ class YeYaCallService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "UPDATE_SCREEN_SHARE") {
-            updateScreenShare(intent)
+            val imageData = intent.getByteArrayExtra("imageData")
+            if (imageData != null) {
+                updateScreenShare(imageData)
+            }
         } else {
             val notificationIntent = Intent(this, YeYaCallActivity::class.java)
             val pendingIntent = PendingIntent.getActivity(
@@ -61,15 +64,12 @@ class YeYaCallService : Service() {
         return START_STICKY
     }
 
-    fun updateScreenShare(intent: Intent) {
-        val imageData = intent.getByteArrayExtra("imageData")
-        if (imageData != null) {
-            val intent = Intent(this, YeYaCallActivity::class.java)
-            intent.action = "UPDATE_SCREEN_SHARE"
-            intent.putExtra("imageData", imageData)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-        }
+    fun updateScreenShare(imageData: ByteArray) {
+        val intent = Intent(this, YeYaCallActivity::class.java)
+        intent.action = "UPDATE_SCREEN_SHARE"
+        intent.putExtra("imageData", imageData)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(intent)
     }
 
 

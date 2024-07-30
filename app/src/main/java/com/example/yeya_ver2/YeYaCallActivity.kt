@@ -3,6 +3,7 @@ package com.example.yeya_ver2
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.ImageView
 
@@ -12,7 +13,13 @@ class YeYaCallActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_yeyacall)
+
         screenShareImageView = findViewById(R.id.screenShareImageView)
+        if (screenShareImageView == null) {
+            Log.e("YeYaCallActivity", "screenShareImageView not found in layout")
+            finish()
+            return
+        }
 
         handleIntent(intent)
     }

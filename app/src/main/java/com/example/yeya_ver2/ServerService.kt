@@ -129,9 +129,8 @@ class ServerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e("ServerService", "Error handling client", e)
-            } finally {
-                client.close()
             }
+            // Don't close the client socket here
         }
     }
 

@@ -8,12 +8,12 @@
           <targets>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="PhysicalDevice" identifier="serial=R54T4031QXP" />
+                <DeviceId pluginId="PhysicalDevice" identifier="serial=R39M30BQT3W" />
               </handle>
             </Target>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="PhysicalDevice" identifier="serial=R39M30BQT3W" />
+                <DeviceId pluginId="PhysicalDevice" identifier="serial=R54T4031QXP" />
               </handle>
             </Target>
           </targets>
