@@ -1,5 +1,6 @@
 package com.example.yeya_ver2
 
+import YeYaCallService
 import android.app.*
 import android.content.Context
 import android.content.Intent
@@ -109,14 +110,22 @@ class ServerService : Service() {
             try {
                 val message = reader.readLine()
                 if (message == "Client connected to Server") {
-                    Log.d("ServerService", "Received: $message")
+                    Log.d(TAG, "Received: $message")
                     writer.println("Server connected to Client")
-                    Log.d("ServerService", "Sent: Server connected to Client")
+                    Log.d(TAG, "Sent: Server connected to Client")
+
+                    // Start YeYaCallService
+                    val intent = Intent(this@ServerService, YeYaCallService::class.java).apply {
+                        putExtra("clientAddress", client.inetAddress.hostAddress)
+                        putExtra("clientPort", client.port)
+                    }
+                    startService(intent)
+
+                    // Stop OverlayService
+                    stopService(Intent(this@ServerService, OverlayService::class.java))
                 }
             } catch (e: Exception) {
-                Log.e("ServerService", "Error handling client", e)
-            } finally {
-                client.close()
+                Log.e(TAG, "Error handling client", e)
             }
         }
     }

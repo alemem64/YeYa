@@ -44,6 +44,7 @@ import android.speech.tts.TextToSpeech
 import java.util.*
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
@@ -55,6 +56,9 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
+
+import android.os.Handler
+import android.os.Looper
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -81,6 +85,17 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
 
     private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
+
+    private var isTransmitting = false
+    private val imageReader: ImageReader by lazy {
+        ImageReader.newInstance(
+            Resources.getSystem().displayMetrics.widthPixels,
+            Resources.getSystem().displayMetrics.heightPixels,
+            PixelFormat.RGBA_8888,
+            2
+        )
+    }
+
 
 
 
@@ -130,13 +145,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
             if (data != null) {
                 mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
-                Log.d(TAG, "Media projection created")
-            } else {
-                Log.e(TAG, "Failed to get media projection data")
+                setupVirtualDisplay()
             }
         }
 
         return START_STICKY
+    }
+
+    private fun setupVirtualDisplay() {
+        val metrics = Resources.getSystem().displayMetrics
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+        val screenDensity = metrics.densityDpi
+
+        mediaProjection?.let { projection ->
+            virtualDisplay = projection.createVirtualDisplay(
+                "ScreenCapture",
+                screenWidth, screenHeight, screenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface, null, null
+            )
+        }
     }
 
     private fun isNotificationPermissionGranted(): Boolean {
@@ -221,7 +250,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun handleLongPress() {
         Log.d(TAG, "Long press detected - 2 seconds")
         networkCoroutineScope.launch {
-            connectToServer()
+            val serverInfo = discoverServer()
+            if (serverInfo != null) {
+                val (serverAddress, serverPort) = serverInfo
+                connectToServer(serverAddress, serverPort)
+            } else {
+                Log.e(TAG, "No server found")
+            }
         }
     }
 
@@ -255,14 +290,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private suspend fun connectToServer() {
-        val serverInfo = discoverServer()
-        if (serverInfo == null) {
-            Log.e(TAG, "No server found")
-            return
-        }
-
-        val (serverAddress, serverPort) = serverInfo
+    private suspend fun connectToServer(serverAddress: String, serverPort: Int) {
         withContext(Dispatchers.IO) {
             try {
                 val socket = Socket(serverAddress, serverPort)
@@ -278,8 +306,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                 }
-
-                socket.close()
             } catch (e: Exception) {
                 Log.e(TAG, "Error connecting to server", e)
             }
@@ -287,10 +313,28 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startScreenSharing(socket: Socket) {
-        // Implement screen recording and data sending logic here
-        // This is where you'd capture the screen and send it over the socket
-        Log.d(TAG, "Starting screen sharing")
-        // For now, we'll just log a message
+        isTransmitting = true
+        networkCoroutineScope.launch {
+            val outputStream = socket.getOutputStream()
+
+            while (isTransmitting) {
+                val image = imageReader.acquireLatestImage()
+                image?.use {
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+                    outputStream.write(bytes)
+                    outputStream.flush()
+                }
+                delay(100) // Adjust this value to control frame rate
+            }
+        }
+    }
+
+    private fun stopScreenSharing() {
+        isTransmitting = false
+        virtualDisplay?.release()
+        mediaProjection?.stop()
     }
 
 
@@ -592,6 +636,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         networkCoroutineScope.cancel() // Add this line
         tts.stop()
         tts.shutdown()
+        stopScreenSharing()
     }
 
 }
