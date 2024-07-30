@@ -93,6 +93,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
@@ -272,6 +273,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private var clientSocket: Socket? = null
+
     private suspend fun connectToServer() {
         val serverInfo = discoverServer()
         if (serverInfo == null) {
@@ -282,9 +285,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val (serverAddress, serverPort) = serverInfo
         withContext(Dispatchers.IO) {
             try {
-                val socket = Socket(serverAddress, serverPort)
-                val out = PrintWriter(socket.getOutputStream(), true)
-                val input = BufferedReader(InputStreamReader(socket.inputStream))
+                clientSocket = Socket(serverAddress, serverPort)
+                val out = PrintWriter(clientSocket?.getOutputStream(), true)
+                val input = BufferedReader(InputStreamReader(clientSocket?.getInputStream()))
 
                 out.println("Client connected to Server")
                 val response = input.readLine()
@@ -297,21 +300,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     Log.d(TAG, "Sent startYeYaCall message to server")
 
                     // Start screen recording and sharing
-                    startScreenRecordingAndSharing(socket)
+                    startScreenRecordingAndSharing()
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
+                    clientSocket?.close()
                 }
-
-                socket.close()
             } catch (e: Exception) {
                 Log.e(TAG, "Error connecting to server", e)
+                clientSocket?.close()
             }
         }
     }
 
 
 
-    private fun startScreenRecordingAndSharing(socket: Socket) {
+    private fun startScreenRecordingAndSharing() {
         val metrics = resources.displayMetrics
         screenDensity = metrics.densityDpi
         screenWidth = metrics.widthPixels
@@ -328,13 +331,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
             if (image != null) {
-                sendImageToServer(image, socket)
+                sendImageToServer(image)
                 image.close()
             }
         }, handler)
     }
 
-    private fun sendImageToServer(image: Image, socket: Socket) {
+    private fun sendImageToServer(image: Image) {
         val planes = image.planes
         val buffer = planes[0].buffer
         val pixelStride = planes[0].pixelStride
@@ -352,11 +355,16 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val byteArray = stream.toByteArray()
 
         try {
-            val outputStream = socket.getOutputStream()
-            outputStream.write(byteArray.size.toString().toByteArray())
-            outputStream.write("\n".toByteArray())
-            outputStream.write(byteArray)
-            outputStream.flush()
+            clientSocket?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    outputStream.write(byteArray.size.toString().toByteArray())
+                    outputStream.write("\n".toByteArray())
+                    outputStream.write(byteArray)
+                    outputStream.flush()
+                }
+            }
+
         } catch (e: Exception) {
             Log.e(TAG, "Error sending image to server", e)
         }
@@ -660,6 +668,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         networkCoroutineScope.cancel() // Add this line
         tts.stop()
         tts.shutdown()
+        clientSocket?.close()
     }
 
 }
+
