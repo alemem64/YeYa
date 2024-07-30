@@ -299,7 +299,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
             }
             Log.d(TAG, "Screenshot saved: ${imageFile.absolutePath}")
-            // Notify the media scanner about the new file
+            // Notify the media scanner about the new file.
             val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
             mediaScanIntent.data = Uri.fromFile(imageFile)
             sendBroadcast(mediaScanIntent)
