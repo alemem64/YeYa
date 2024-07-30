@@ -57,6 +57,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
+import java.nio.ByteBuffer
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -332,7 +333,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             val image = reader.acquireLatestImage()
             if (image != null) {
                 sendImageToServer(image)
-                image.close()
             }
         }, handler)
     }
@@ -359,14 +359,16 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                         val byteArray = stream.toByteArray()
 
                         val outputStream = socket.getOutputStream()
-                        outputStream.write(byteArray.size.toString().toByteArray())
-                        outputStream.write("\n".toByteArray())
+                        val dataSize = byteArray.size
+                        outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
                         outputStream.write(byteArray)
                         outputStream.flush()
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending image to server", e)
+            } finally {
+                image.close()
             }
         }
     }

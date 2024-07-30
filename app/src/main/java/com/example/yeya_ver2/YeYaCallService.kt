@@ -1,5 +1,8 @@
 package com.example.yeya_ver2
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -20,27 +23,59 @@ class YeYaCallService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var imageView: ImageView
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
+    private val CHANNEL_ID = "YeYaCallServiceChannel"
+
 
     override fun onCreate() {
         super.onCreate()
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        setupImageView()
+        createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = NotificationCompat.Builder(this, "YeYaCallServiceChannel")
+        val notificationIntent = Intent(this, YeYaCallActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("YeYa Call")
             .setContentText("Screen sharing in progress")
             .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(pendingIntent)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else {
-            startForeground(2, notification)
-        }
+        startForeground(1, notification)
+
+        // Start YeYaCallActivity
+        val activityIntent = Intent(this, YeYaCallActivity::class.java)
+        activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(activityIntent)
 
         return START_STICKY
+    }
+
+    fun updateScreenShare(imageData: ByteArray) {
+        val intent = Intent(this, YeYaCallActivity::class.java)
+        intent.action = "UPDATE_SCREEN_SHARE"
+        intent.putExtra("imageData", imageData)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "YeYa Call Service Channel",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(serviceChannel)
+        }
     }
 
     private fun setupImageView() {
