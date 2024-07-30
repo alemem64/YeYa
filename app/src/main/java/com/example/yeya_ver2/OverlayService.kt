@@ -42,7 +42,19 @@ import kotlinx.coroutines.*
 
 import android.speech.tts.TextToSpeech
 import java.util.*
-
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.*
+import java.net.Socket
+import java.io.PrintWriter
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -67,6 +79,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
 
     private lateinit var tts: TextToSpeech
+
+    private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
+
+
 
 
 
@@ -97,8 +113,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand called")
 
-        // Start foreground service first
-        startForeground(NOTIFICATION_ID, createNotification())
+        if (isNotificationPermissionGranted()) {
+            startForeground(NOTIFICATION_ID, createNotification())
+        } else {
+            Log.w(TAG, "Notification permission not granted, running without foreground service")
+        }
 
         intent?.let {
             val resultCode = it.getIntExtra("resultCode", Activity.RESULT_CANCELED)
@@ -118,6 +137,17 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
 
         return START_STICKY
+    }
+
+    private fun isNotificationPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
     }
 
     private fun setupOverlay() {
@@ -186,9 +216,81 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+
+
     private fun handleLongPress() {
         Log.d(TAG, "Long press detected - 2 seconds")
-        // We'll implement the screen sharing functionality here in the next steps
+        networkCoroutineScope.launch {
+            connectToServer()
+        }
+    }
+
+    private suspend fun discoverServer(): Pair<String, Int>? {
+        return withContext(Dispatchers.IO) {
+            val broadcastAddress = "255.255.255.255"
+            val udpPort = 8888 // Choose a port for UDP discovery
+
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                socket.soTimeout = 5000 // 5 seconds timeout
+
+                val sendData = "DISCOVER_YEYA_SERVER".toByteArray()
+                val sendPacket = DatagramPacket(sendData, sendData.size, InetAddress.getByName(broadcastAddress), udpPort)
+                socket.send(sendPacket)
+
+                val receiveData = ByteArray(1024)
+                val receivePacket = DatagramPacket(receiveData, receiveData.size)
+
+                try {
+                    socket.receive(receivePacket)
+                    val serverAddress = receivePacket.address.hostAddress
+                    val serverPort = String(receivePacket.data, 0, receivePacket.length).toInt()
+                    Log.d(TAG, "Discovered server at $serverAddress:$serverPort")
+                    Pair(serverAddress, serverPort)
+                } catch (e: SocketTimeoutException) {
+                    Log.e(TAG, "No server found", e)
+                    null
+                }
+            }
+        }
+    }
+
+    private suspend fun connectToServer() {
+        val serverInfo = discoverServer()
+        if (serverInfo == null) {
+            Log.e(TAG, "No server found")
+            return
+        }
+
+        val (serverAddress, serverPort) = serverInfo
+        withContext(Dispatchers.IO) {
+            try {
+                val socket = Socket(serverAddress, serverPort)
+                val out = PrintWriter(socket.getOutputStream(), true)
+                val input = BufferedReader(InputStreamReader(socket.inputStream))
+
+                out.println("Client connected to Server")
+                val response = input.readLine()
+
+                if (response == "Server connected to Client") {
+                    Log.d(TAG, "Successfully connected to server")
+                    startScreenSharing(socket)
+                } else {
+                    Log.e(TAG, "Unexpected response from server: $response")
+                }
+
+                socket.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error connecting to server", e)
+            }
+        }
+    }
+
+    private fun startScreenSharing(socket: Socket) {
+        // Implement screen recording and data sending logic here
+        // This is where you'd capture the screen and send it over the socket
+        Log.d(TAG, "Starting screen sharing")
+        // For now, we'll just log a message
     }
 
 
@@ -331,10 +433,17 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+
     private fun createNotification(): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val startServerIntent = Intent(this, ServerService::class.java)
+        val startServerPendingIntent = PendingIntent.getService(
+            this, 0, startServerIntent,
             PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -343,6 +452,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             .setContentText("Running")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_notification, "Start Server", startServerPendingIntent)
             .build()
     }
 
@@ -479,7 +589,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         virtualDisplay?.release()
         speechRecognizer.destroy()
         coroutineScope.cancel()
+        networkCoroutineScope.cancel() // Add this line
         tts.stop()
         tts.shutdown()
     }
+
 }

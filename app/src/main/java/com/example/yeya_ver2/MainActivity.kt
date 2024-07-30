@@ -12,15 +12,19 @@ import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.view.accessibility.AccessibilityManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+
 
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
     private val SCREEN_CAPTURE_PERMISSION_REQUEST_CODE = 1
     private val RECORD_AUDIO_PERMISSION_REQUEST_CODE = 2
+    private val NOTIFICATION_PERMISSION_REQUEST_CODE = 3
+    private val WIFI_PERMISSION_REQUEST_CODE = 4
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +41,10 @@ class MainActivity : AppCompatActivity() {
             requestOverlayPermission()
         } else if (!isRecordAudioPermissionGranted()) {
             requestRecordAudioPermission()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isNotificationPermissionGranted()) {
+            requestNotificationPermission()
+        } else if (!isWifiPermissionGranted()) {
+            requestWifiPermission()
         } else {
             startScreenCaptureIntent()
         }
@@ -63,6 +71,42 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun isNotificationPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
+    private fun isWifiPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_WIFI_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestWifiPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.ACCESS_WIFI_STATE),
+            WIFI_PERMISSION_REQUEST_CODE
+        )
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -72,16 +116,25 @@ class MainActivity : AppCompatActivity() {
         when (requestCode) {
             RECORD_AUDIO_PERMISSION_REQUEST_CODE -> {
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    startScreenCaptureIntent()
+                    checkAndRequestPermissions()
                 } else {
                     Log.e(TAG, "Record audio permission denied")
                     Toast.makeText(this, "Record audio permission is required", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
+            WIFI_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    checkAndRequestPermissions()
+                } else {
+                    Log.e(TAG, "Wi-Fi state access permission denied")
+                    Toast.makeText(this, "Wi-Fi state access permission is required for some features", Toast.LENGTH_LONG).show()
+                    // You might want to continue without this permission or finish the app
+                    startScreenCaptureIntent()
+                }
+            }
         }
     }
-
     private fun requestOverlayPermission() {
         Log.d(TAG, "Requesting overlay permission")
         val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
