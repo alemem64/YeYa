@@ -151,3 +151,4 @@ class MainActivity : AppCompatActivity() {
         private const val ACCESSIBILITY_SETTINGS_REQUEST_CODE = 3
     }
 }
+//.
