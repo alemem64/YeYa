@@ -157,6 +157,7 @@ class ServerService : Service() {
 
                     // Read image data
                     val imageData = ByteArray(imageSize)
+                    Log.d(TAG, "Image Received") // Add this line₩
                     var totalBytesRead = 0
                     while (totalBytesRead < imageSize) {
                         val bytesRead = inputStream.read(imageData, totalBytesRead, imageSize - totalBytesRead)

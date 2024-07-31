@@ -372,6 +372,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun resizeAndCompressBitmap(original: Bitmap, targetWidth: Int, targetHeight: Int, quality: Int): ByteArray {
+        val resized = Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true)
+        val outputStream = ByteArrayOutputStream()
+        resized.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+        return outputStream.toByteArray()
+    }
+
     private fun sendImageToServer(image: Image) {
         coroutineScope.launch(Dispatchers.IO) {
             try {
@@ -389,14 +396,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                         )
                         bitmap.copyPixelsFromBuffer(buffer)
 
-                        val stream = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
-                        val byteArray = stream.toByteArray()
+                        // Resize and compress the bitmap
+                        val targetWidth = screenWidth / 2
+                        val targetHeight = screenHeight / 2
+                        val compressQuality = 50 // Adjust this value to balance quality and size
+                        val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
 
                         val outputStream = socket.getOutputStream()
-                        val dataSize = byteArray.size
+                        val dataSize = compressedImageData.size
                         outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                        outputStream.write(byteArray)
+
+                        Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
+                        outputStream.write(compressedImageData)
                         outputStream.flush()
                     }
                 }
