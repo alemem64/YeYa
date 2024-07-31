@@ -90,6 +90,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var screenWidth: Int = 0
     private var screenHeight: Int = 0
 
+    companion object {
+        const val FRAME_RATE = 10 // Default 10 FPS
+    }
+
+    private val frameInterval = 1000L / FRAME_RATE
+
+    private var isRecording = false
+
 
 
 
@@ -320,9 +328,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun startScreenRecordingAndSharing() {
         val metrics = resources.displayMetrics
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        screenWidth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            bounds.width()
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.width
+        }
+
+        screenHeight = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            bounds.height()
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.height
+        }
+
         screenDensity = metrics.densityDpi
-        screenWidth = metrics.widthPixels
-        screenHeight = metrics.heightPixels
 
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
         virtualDisplay = mediaProjection?.createVirtualDisplay(
@@ -332,19 +358,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             imageReader?.surface, null, null
         )
 
-        imageReader?.setOnImageAvailableListener({ reader ->
-            synchronized(imageLock) {
-                if (!isProcessingImage) {
-                    isProcessingImage = true
-                    val image = reader.acquireLatestImage()
-                    if (image != null) {
-                        sendImageToServer(image)
-                    } else {
-                        isProcessingImage = false
-                    }
-                }
+        isRecording = true
+        coroutineScope.launch(Dispatchers.Default) {
+            while (isRecording) {
+                captureAndSendFrame()
+                delay(frameInterval)
             }
-        }, handler)
+        }
+    }
+    private fun captureAndSendFrame() {
+        imageReader?.acquireLatestImage()?.use { image ->
+            sendImageToServer(image)
+        }
     }
 
     private fun sendImageToServer(image: Image) {
@@ -377,11 +402,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending image to server", e)
-            } finally {
-                image.close()
-                synchronized(imageLock) {
-                    isProcessingImage = false
-                }
             }
         }
     }
