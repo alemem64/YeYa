@@ -58,6 +58,8 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
+import kotlinx.coroutines.channels.Channel
+
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -90,12 +92,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var screenWidth: Int = 0
     private var screenHeight: Int = 0
 
-    companion object {
-        const val FRAME_RATE = 10 // Default 10 FPS
-    }
-
-    private val frameInterval = 1000L / FRAME_RATE
-
+    private val imageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val FPS = 24// Adjust this value for desired frame rate
+    private val frameInterval = 1000L / FPS
     private var isRecording = false
 
 
@@ -359,16 +358,84 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         )
 
         isRecording = true
+        launchImageProducer()
+        launchImageConsumer()
+    }
+
+    private fun launchImageProducer() {
         coroutineScope.launch(Dispatchers.Default) {
+            var lastCaptureTime = System.currentTimeMillis()
             while (isRecording) {
-                captureAndSendFrame()
-                delay(frameInterval)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastCaptureTime >= frameInterval) {
+                    captureAndEnqueueFrame()
+                    lastCaptureTime = currentTime
+                }
+                delay(1) // Small delay to prevent busy waiting
             }
         }
     }
+
+    private fun launchImageConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (isRecording) {
+                val imageData = imageQueue.receive()
+                sendImageToServer(imageData)
+            }
+        }
+    }
+
+    private suspend fun captureAndEnqueueFrame() {
+        withContext(Dispatchers.Default) {
+            try {
+                imageReader?.acquireLatestImage()?.use { image ->
+                    val planes = image.planes
+                    val buffer = planes[0].buffer
+                    val pixelStride = planes[0].pixelStride
+                    val rowStride = planes[0].rowStride
+                    val rowPadding = rowStride - pixelStride * screenWidth
+
+                    val bitmap = Bitmap.createBitmap(
+                        screenWidth + rowPadding / pixelStride, screenHeight,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    bitmap.copyPixelsFromBuffer(buffer)
+
+                    val targetWidth = screenWidth / 2
+                    val targetHeight = screenHeight / 2
+                    val compressQuality = 50
+                    val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
+
+                    imageQueue.send(compressedImageData)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error capturing frame", e)
+            }
+        }
+    }
+
     private fun captureAndSendFrame() {
         imageReader?.acquireLatestImage()?.use { image ->
-            sendImageToServer(image)
+            val planes = image.planes
+            val buffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+            val rowPadding = rowStride - pixelStride * screenWidth
+
+            val bitmap = Bitmap.createBitmap(
+                screenWidth + rowPadding / pixelStride, screenHeight,
+                Bitmap.Config.ARGB_8888
+            )
+            bitmap.copyPixelsFromBuffer(buffer)
+
+            val targetWidth = screenWidth / 2
+            val targetHeight = screenHeight / 2
+            val compressQuality = 50
+            val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
+
+            coroutineScope.launch {
+                sendImageToServer(compressedImageData)
+            }
         }
     }
 
@@ -379,41 +446,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         return outputStream.toByteArray()
     }
 
-    private fun sendImageToServer(image: Image) {
-        coroutineScope.launch(Dispatchers.IO) {
-            try {
-                clientSocket?.let { socket ->
-                    if (!socket.isClosed) {
-                        val planes = image.planes
-                        val buffer = planes[0].buffer
-                        val pixelStride = planes[0].pixelStride
-                        val rowStride = planes[0].rowStride
-                        val rowPadding = rowStride - pixelStride * screenWidth
-
-                        val bitmap = Bitmap.createBitmap(
-                            screenWidth + rowPadding / pixelStride, screenHeight,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        bitmap.copyPixelsFromBuffer(buffer)
-
-                        // Resize and compress the bitmap
-                        val targetWidth = screenWidth / 2
-                        val targetHeight = screenHeight / 2
-                        val compressQuality = 50 // Adjust this value to balance quality and size
-                        val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
-
-                        val outputStream = socket.getOutputStream()
-                        val dataSize = compressedImageData.size
-                        outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-
-                        Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
-                        outputStream.write(compressedImageData)
-                        outputStream.flush()
-                    }
+    private suspend fun sendImageToServer(imageData: ByteArray) {
+        try {
+            clientSocket?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    val dataSize = imageData.size
+                    outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                    Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
+                    outputStream.write(imageData)
+                    outputStream.flush()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending image to server", e)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending image to server", e)
+            // Implement reconnection logic here if needed
         }
     }
 

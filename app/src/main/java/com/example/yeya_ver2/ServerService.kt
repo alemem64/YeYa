@@ -146,10 +146,10 @@ class ServerService : Service() {
 
     private fun receiveScreenSharing(client: Socket) {
         coroutineScope.launch(Dispatchers.IO) {
-            try {
-                val inputStream = BufferedInputStream(client.inputStream)
-                val sizeBuffer = ByteArray(4)
+            val inputStream = BufferedInputStream(client.inputStream)
+            val sizeBuffer = ByteArray(4)
 
+            try {
                 while (!client.isClosed) {
                     // Read image size
                     if (inputStream.read(sizeBuffer) == -1) break
@@ -157,7 +157,6 @@ class ServerService : Service() {
 
                     // Read image data
                     val imageData = ByteArray(imageSize)
-                    Log.d(TAG, "Image Received") // Add this line₩
                     var totalBytesRead = 0
                     while (totalBytesRead < imageSize) {
                         val bytesRead = inputStream.read(imageData, totalBytesRead, imageSize - totalBytesRead)
@@ -166,15 +165,18 @@ class ServerService : Service() {
                     }
 
                     if (totalBytesRead == imageSize) {
+                        Log.d(TAG, "Image Received (Size: $imageSize bytes)")
                         // Update image in YeYaCallService
                         val intent = Intent(this@ServerService, YeYaCallService::class.java)
                         intent.action = "UPDATE_SCREEN_SHARE"
                         intent.putExtra("imageData", imageData)
                         startService(intent)
+                    } else {
+                        Log.e(TAG, "Incomplete image received")
                     }
                 }
             } catch (e: Exception) {
-                Log.e("ServerService", "Error in receiveScreenSharing", e)
+                Log.e(TAG, "Error in receiveScreenSharing", e)
             } finally {
                 client.close()
             }
