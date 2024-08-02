@@ -33,6 +33,8 @@ class ServerService : Service() {
     private var serverSocket: ServerSocket? = null
     private val coroutineScope = CoroutineScope(Dispatchers.IO)
     private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
+    private var clientScreenWidth: Int = 0
+    private var clientScreenHeight: Int = 0
 
 
     override fun onCreate() {
@@ -114,23 +116,31 @@ class ServerService : Service() {
             try {
                 val message = reader.readLine()
                 if (message == "Client connected to Server") {
-                    Log.d("ServerService", "Received: $message")
+                    Log.d(TAG, "Received: $message")
                     writer.println("Server connected to Client")
-                    Log.d("ServerService", "Sent: Server connected to Client")
+                    Log.d(TAG, "Sent: Server connected to Client")
+
+                    // Wait for screen dimensions
+                    val dimensionsMessage = reader.readLine()
+                    if (dimensionsMessage.startsWith("SCREEN_DIMENSIONS|")) {
+                        val (width, height) = dimensionsMessage.split("|")[1].split(",").map { it.toInt() }
+                        clientScreenWidth = width
+                        clientScreenHeight = height
+                        Log.d(TAG, "Received client screen dimensions: $width x $height")
+                    }
 
                     // Wait for startYeYaCall message
                     val startYeYaCallMessage = reader.readLine()
                     if (startYeYaCallMessage == "startYeYaCall") {
-                        Log.d("ServerService", "Received startYeYaCall message")
+                        Log.d(TAG, "Received startYeYaCall message")
                         startYeYaCallService()
                         stopOverlayService()
                         receiveScreenSharing(client)
                     }
                 }
             } catch (e: Exception) {
-                Log.e("ServerService", "Error handling client", e)
+                Log.e(TAG, "Error handling client", e)
             }
-            // Don't close the client socket here
         }
     }
 

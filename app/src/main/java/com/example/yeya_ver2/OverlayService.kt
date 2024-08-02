@@ -45,6 +45,7 @@ import java.util.*
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
+import android.util.DisplayMetrics
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
@@ -290,7 +291,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        val (serverAddress, serverPort) = serverInfo
+        val (serverAddress, serverPort, _) = serverInfo
         withContext(Dispatchers.IO) {
             try {
                 clientSocket = Socket(serverAddress, serverPort)
@@ -302,6 +303,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                 if (response == "Server connected to Client") {
                     Log.d(TAG, "Successfully connected to server")
+
+                    // Send screen dimensions
+                    val (width, height) = getScreenDimensions()
+                    out.println("SCREEN_DIMENSIONS|$width,$height")
+                    Log.d(TAG, "Sent screen dimensions: $width x $height")
 
                     // Send startYeYaCall message
                     out.println("startYeYaCall")
@@ -470,6 +476,20 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e(TAG, "Error sending image to server", e)
             // Implement reconnection logic here if needed
+        }
+    }
+
+    private fun getScreenDimensions(): Pair<Int, Int> {
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val displayMetrics = DisplayMetrics()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            return Pair(bounds.width(), bounds.height())
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getMetrics(displayMetrics)
+            return Pair(displayMetrics.widthPixels, displayMetrics.heightPixels)
         }
     }
 
