@@ -2,10 +2,13 @@ package com.example.yeya_ver2
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
+import android.graphics.Path
+import android.view.MotionEvent
 
 class YeyaAccessibilityService : AccessibilityService() {
     private val TAG = "YeyaAccessibilityService"
@@ -114,6 +117,44 @@ class YeyaAccessibilityService : AccessibilityService() {
             parent = newParent
         }
         return null
+    }
+
+    fun simulateTouch(x: Int, y: Int, action: Int) {
+        val path = Path()
+        path.moveTo(x.toFloat(), y.toFloat())
+
+        val gestureBuilder = GestureDescription.Builder()
+        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
+        gestureBuilder.addStroke(gestureStroke)
+
+        dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                Log.d(TAG, "Touch event completed: $action at ($x, $y)")
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                Log.e(TAG, "Touch event cancelled: $action at ($x, $y)")
+            }
+        }, null)
+    }
+
+    fun simulateClick(x: Int, y: Int) {
+        val clickPath = Path()
+        clickPath.moveTo(x.toFloat(), y.toFloat())
+
+        val clickBuilder = GestureDescription.Builder()
+        val clickStroke = GestureDescription.StrokeDescription(clickPath, 0, 50) // 50ms duration for a click
+        clickBuilder.addStroke(clickStroke)
+
+        dispatchGesture(clickBuilder.build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                Log.d(TAG, "Click completed at ($x, $y)")
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                Log.e(TAG, "Click cancelled at ($x, $y)")
+            }
+        }, null)
     }
 
     override fun onDestroy() {

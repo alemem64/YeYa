@@ -98,7 +98,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val frameInterval = 1000L / FPS
     private var isRecording = false
 
-
+    private var lastTouchDownTime: Long = 0
+    private var lastTouchDownX: Int = 0
+    private var lastTouchDownY: Int = 0
+    private val CLICK_TIME_THRESHOLD = 200 // milliseconds
 
 
 
@@ -315,6 +318,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                     // Start screen recording and sharing
                     startScreenRecordingAndSharing()
+
+                    // Handle incoming touch events
+                    handleIncomingTouchEvents()
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -493,6 +499,51 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun handleIncomingTouchEvents() {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
+                while (isActive) {
+                    val message = reader.readLine() ?: break
+                    when {
+                        message.startsWith("TOUCH_DOWN|") -> processTouchEvent(message, MotionEvent.ACTION_DOWN)
+                        message.startsWith("TOUCH_MOVE|") -> processTouchEvent(message, MotionEvent.ACTION_MOVE)
+                        message.startsWith("TOUCH_UP|") -> processTouchEvent(message, MotionEvent.ACTION_UP)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling incoming touch events", e)
+            }
+        }
+    }
+
+
+
+    private fun processTouchEvent(message: String, action: Int) {
+        val (x, y) = message.split("|")[1].split(",").map { it.toInt() }
+        when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouchDownTime = System.currentTimeMillis()
+                lastTouchDownX = x
+                lastTouchDownY = y
+                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+            }
+            MotionEvent.ACTION_UP -> {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastTouchDownTime < CLICK_TIME_THRESHOLD &&
+                    Math.abs(x - lastTouchDownX) < 10 && Math.abs(y - lastTouchDownY) < 10) {
+                    // This is a click
+                    YeyaAccessibilityService.getInstance()?.simulateClick(x, y)
+                } else {
+                    // This is the end of a drag
+                    YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+                }
+            }
+        }
+    }
 
     private fun vibrate() {
         Log.d(TAG, "Vibrating")
