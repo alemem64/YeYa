@@ -124,13 +124,13 @@ class YeyaAccessibilityService : AccessibilityService() {
 
     private val gestureCallback = object : AccessibilityService.GestureResultCallback() {
         override fun onCompleted(gestureDescription: GestureDescription?) {
-            Log.d(TAG, "Gesture completed")
+            Log.d(TAG, "Gesture completed: $gestureDescription")
             synchronized(gestureLock) {
                 currentGesture = null
             }
         }
         override fun onCancelled(gestureDescription: GestureDescription?) {
-            Log.d(TAG, "Gesture cancelled")
+            Log.d(TAG, "Gesture cancelled: $gestureDescription")
             synchronized(gestureLock) {
                 currentGesture = null
             }
@@ -147,18 +147,25 @@ class YeyaAccessibilityService : AccessibilityService() {
             }
 
             val path = Path()
+            val gestureBuilder = GestureDescription.Builder()
             when (action) {
-                MotionEvent.ACTION_DOWN -> path.moveTo(x.toFloat(), y.toFloat())
+                MotionEvent.ACTION_DOWN -> {
+                    path.moveTo(x.toFloat(), y.toFloat())
+                    val pressStroke = GestureDescription.StrokeDescription(path, 0, 50)
+                    gestureBuilder.addStroke(pressStroke)
+                }
                 MotionEvent.ACTION_MOVE -> {
                     path.moveTo(x.toFloat(), y.toFloat())
                     path.lineTo(x.toFloat(), y.toFloat())
+                    val moveStroke = GestureDescription.StrokeDescription(path, 0, 1)
+                    gestureBuilder.addStroke(moveStroke)
                 }
-                MotionEvent.ACTION_UP -> path.lineTo(x.toFloat(), y.toFloat())
+                MotionEvent.ACTION_UP -> {
+                    path.moveTo(x.toFloat(), y.toFloat())
+                    val releaseStroke = GestureDescription.StrokeDescription(path, 0, 1)
+                    gestureBuilder.addStroke(releaseStroke)
+                }
             }
-
-            val gestureBuilder = GestureDescription.Builder()
-            val gestureStroke = GestureDescription.StrokeDescription(path, 0L, 100L) // Specify Long type
-            gestureBuilder.addStroke(gestureStroke)
 
             currentGesture = gestureBuilder.build()
             val result = dispatchGesture(currentGesture!!, gestureCallback, null)

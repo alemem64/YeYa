@@ -520,7 +520,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
-    private var lastAction: Int = -1
+    private var lastX: Int = -1
+    private var lastY: Int = -1
 
     private fun processTouchEvent(message: String, action: Int) {
         val (x, y) = message.split("|")[1].split(",").map { it.toInt() }
@@ -528,19 +529,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
         when (action) {
             MotionEvent.ACTION_DOWN -> {
-                lastAction = MotionEvent.ACTION_DOWN
+                lastX = x
+                lastY = y
                 YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (lastAction != MotionEvent.ACTION_MOVE) {
-                    // Only send ACTION_MOVE if it's a new move sequence
+                if (x != lastX || y != lastY) {
                     YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-                    lastAction = MotionEvent.ACTION_MOVE
+                    lastX = x
+                    lastY = y
                 }
             }
             MotionEvent.ACTION_UP -> {
                 YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-                lastAction = -1
+                lastX = -1
+                lastY = -1
             }
         }
     }
