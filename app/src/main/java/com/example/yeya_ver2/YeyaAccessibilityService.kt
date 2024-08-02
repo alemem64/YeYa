@@ -13,11 +13,14 @@ import android.view.MotionEvent
 class YeyaAccessibilityService : AccessibilityService() {
     private val TAG = "YeyaAccessibilityService"
     private var currentCaptureId: Int = 0
+    private var currentGesture: GestureDescription? = null
+    private val gestureLock = Any()
 
     companion object {
         private var instance: YeyaAccessibilityService? = null
 
         fun getInstance(): YeyaAccessibilityService? {
+            Log.d("YeyaAccessibilityService", "getInstance called, instance is ${if (instance == null) "null" else "not null"}")
             return instance
         }
     }
@@ -119,44 +122,70 @@ class YeyaAccessibilityService : AccessibilityService() {
         return null
     }
 
+    private val gestureCallback = object : AccessibilityService.GestureResultCallback() {
+        override fun onCompleted(gestureDescription: GestureDescription?) {
+            Log.d(TAG, "Gesture completed")
+            synchronized(gestureLock) {
+                currentGesture = null
+            }
+        }
+        override fun onCancelled(gestureDescription: GestureDescription?) {
+            Log.d(TAG, "Gesture cancelled")
+            synchronized(gestureLock) {
+                currentGesture = null
+            }
+        }
+    }
+
     fun simulateTouch(x: Int, y: Int, action: Int) {
         Log.d(TAG, "Simulating touch: action=$action, x=$x, y=$y")
-        val path = Path()
-        path.moveTo(x.toFloat(), y.toFloat())
 
-        val gestureBuilder = GestureDescription.Builder()
-        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
-        gestureBuilder.addStroke(gestureStroke)
-
-        dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "Touch event completed: action=$action at ($x, $y)")
+        synchronized(gestureLock) {
+            if (currentGesture != null) {
+                Log.d(TAG, "Previous gesture still in progress, skipping")
+                return
             }
 
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                Log.e(TAG, "Touch event cancelled: action=$action at ($x, $y)")
+            val path = Path()
+            when (action) {
+                MotionEvent.ACTION_DOWN -> path.moveTo(x.toFloat(), y.toFloat())
+                MotionEvent.ACTION_MOVE -> {
+                    path.moveTo(x.toFloat(), y.toFloat())
+                    path.lineTo(x.toFloat(), y.toFloat())
+                }
+                MotionEvent.ACTION_UP -> path.lineTo(x.toFloat(), y.toFloat())
             }
-        }, null)
+
+            val gestureBuilder = GestureDescription.Builder()
+            val gestureStroke = GestureDescription.StrokeDescription(path, 0L, 100L) // Specify Long type
+            gestureBuilder.addStroke(gestureStroke)
+
+            currentGesture = gestureBuilder.build()
+            val result = dispatchGesture(currentGesture!!, gestureCallback, null)
+            Log.d(TAG, "dispatchGesture result: $result")
+        }
     }
 
     fun simulateClick(x: Int, y: Int) {
         Log.d(TAG, "Simulating click at ($x, $y)")
-        val clickPath = Path()
-        clickPath.moveTo(x.toFloat(), y.toFloat())
 
-        val clickBuilder = GestureDescription.Builder()
-        val clickStroke = GestureDescription.StrokeDescription(clickPath, 0, 50) // 50ms duration for a click
-        clickBuilder.addStroke(clickStroke)
-
-        dispatchGesture(clickBuilder.build(), object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "Click completed at ($x, $y)")
+        synchronized(gestureLock) {
+            if (currentGesture != null) {
+                Log.d(TAG, "Previous gesture still in progress, skipping")
+                return
             }
 
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                Log.e(TAG, "Click cancelled at ($x, $y)")
-            }
-        }, null)
+            val clickPath = Path()
+            clickPath.moveTo(x.toFloat(), y.toFloat())
+
+            val clickBuilder = GestureDescription.Builder()
+            val clickStroke = GestureDescription.StrokeDescription(clickPath, 0L, 150L) // Specify Long type
+            clickBuilder.addStroke(clickStroke)
+
+            currentGesture = clickBuilder.build()
+            val result = dispatchGesture(currentGesture!!, gestureCallback, null)
+            Log.d(TAG, "dispatchGesture result: $result")
+        }
     }
 
     override fun onDestroy() {

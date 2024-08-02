@@ -520,29 +520,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
+    private var lastAction: Int = -1
+
     private fun processTouchEvent(message: String, action: Int) {
         val (x, y) = message.split("|")[1].split(",").map { it.toInt() }
         Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
+
         when (action) {
             MotionEvent.ACTION_DOWN -> {
-                lastTouchDownTime = System.currentTimeMillis()
-                lastTouchDownX = x
-                lastTouchDownY = y
+                lastAction = MotionEvent.ACTION_DOWN
                 YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
             }
             MotionEvent.ACTION_MOVE -> {
-                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+                if (lastAction != MotionEvent.ACTION_MOVE) {
+                    // Only send ACTION_MOVE if it's a new move sequence
+                    YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+                    lastAction = MotionEvent.ACTION_MOVE
+                }
             }
             MotionEvent.ACTION_UP -> {
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastTouchDownTime < CLICK_TIME_THRESHOLD &&
-                    Math.abs(x - lastTouchDownX) < 10 && Math.abs(y - lastTouchDownY) < 10) {
-                    Log.d(TAG, "Simulating click at ($x, $y)")
-                    YeyaAccessibilityService.getInstance()?.simulateClick(x, y)
-                } else {
-                    Log.d(TAG, "Simulating touch up at ($x, $y)")
-                    YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-                }
+                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
+                lastAction = -1
             }
         }
     }
