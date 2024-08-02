@@ -120,6 +120,7 @@ class YeyaAccessibilityService : AccessibilityService() {
     }
 
     fun simulateTouch(x: Int, y: Int, action: Int) {
+        Log.d(TAG, "Simulating touch: action=$action, x=$x, y=$y")
         val path = Path()
         path.moveTo(x.toFloat(), y.toFloat())
 
@@ -129,16 +130,17 @@ class YeyaAccessibilityService : AccessibilityService() {
 
         dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "Touch event completed: $action at ($x, $y)")
+                Log.d(TAG, "Touch event completed: action=$action at ($x, $y)")
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
-                Log.e(TAG, "Touch event cancelled: $action at ($x, $y)")
+                Log.e(TAG, "Touch event cancelled: action=$action at ($x, $y)")
             }
         }, null)
     }
 
     fun simulateClick(x: Int, y: Int) {
+        Log.d(TAG, "Simulating click at ($x, $y)")
         val clickPath = Path()
         clickPath.moveTo(x.toFloat(), y.toFloat())
 

@@ -505,6 +505,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
                 while (isActive) {
                     val message = reader.readLine() ?: break
+                    Log.d(TAG, "Received touch event: $message")
                     when {
                         message.startsWith("TOUCH_DOWN|") -> processTouchEvent(message, MotionEvent.ACTION_DOWN)
                         message.startsWith("TOUCH_MOVE|") -> processTouchEvent(message, MotionEvent.ACTION_MOVE)
@@ -521,6 +522,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun processTouchEvent(message: String, action: Int) {
         val (x, y) = message.split("|")[1].split(",").map { it.toInt() }
+        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
         when (action) {
             MotionEvent.ACTION_DOWN -> {
                 lastTouchDownTime = System.currentTimeMillis()
@@ -535,15 +537,16 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastTouchDownTime < CLICK_TIME_THRESHOLD &&
                     Math.abs(x - lastTouchDownX) < 10 && Math.abs(y - lastTouchDownY) < 10) {
-                    // This is a click
+                    Log.d(TAG, "Simulating click at ($x, $y)")
                     YeyaAccessibilityService.getInstance()?.simulateClick(x, y)
                 } else {
-                    // This is the end of a drag
+                    Log.d(TAG, "Simulating touch up at ($x, $y)")
                     YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
                 }
             }
         }
     }
+
 
     private fun vibrate() {
         Log.d(TAG, "Vibrating")
