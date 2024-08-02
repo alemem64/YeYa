@@ -17,6 +17,11 @@ import java.io.ByteArrayInputStream
 import java.net.Socket
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Bundle
+import android.os.Looper
+import java.io.OutputStream
+import android.os.Handler
+
 
 class YeYaCallService : Service() {
     private val TAG = "YeYaCallService"
@@ -25,43 +30,52 @@ class YeYaCallService : Service() {
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private val CHANNEL_ID = "YeYaCallServiceChannel"
 
+    companion object {
+        var instance: YeYaCallService? = null
+    }
+
 
     override fun onCreate() {
-        super.onCreate()
+        instance = this
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+
         if (intent?.action == "UPDATE_SCREEN_SHARE") {
             val imageData = intent.getByteArrayExtra("imageData")
             if (imageData != null) {
                 updateScreenShare(imageData)
             }
         } else {
-            val notificationIntent = Intent(this, YeYaCallActivity::class.java)
-            val pendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                notificationIntent,
-                PendingIntent.FLAG_IMMUTABLE
-            )
+            val clientScreenWidth = intent?.getIntExtra("clientScreenWidth", 0) ?: 0
+            val clientScreenHeight = intent?.getIntExtra("clientScreenHeight", 0) ?: 0
+            val outputStream = SocketManager.getOutputStream()
 
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("YeYa Call")
-                .setContentText("Screen sharing in progress")
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentIntent(pendingIntent)
-                .build()
-
-            startForeground(1, notification)
-
-            // Start YeYaCallActivity
-            val activityIntent = Intent(this, YeYaCallActivity::class.java)
-            activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(activityIntent)
+            if (outputStream != null) {
+                startYeYaCallActivity(clientScreenWidth, clientScreenHeight, outputStream)
+            } else {
+                Log.e(TAG, "Client socket output stream is null")
+            }
         }
 
         return START_STICKY
+    }
+
+    private fun startYeYaCallActivity(width: Int, height: Int, outputStream: OutputStream) {
+        val activityIntent = Intent(this, YeYaCallActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra("clientScreenWidth", width)
+            putExtra("clientScreenHeight", height)
+        }
+        startActivity(activityIntent)
+
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            val activity = YeYaCallActivity.instance
+            activity?.setClientScreenInfo(width, height, outputStream)
+        }, 500) // Delay to ensure activity is created
     }
 
     fun updateScreenShare(imageData: ByteArray) {
@@ -104,11 +118,14 @@ class YeYaCallService : Service() {
         }
     }
 
+
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
         windowManager.removeView(imageView)
         coroutineScope.cancel()
+        instance = null
     }
 }

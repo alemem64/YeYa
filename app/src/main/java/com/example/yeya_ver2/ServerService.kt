@@ -133,7 +133,7 @@ class ServerService : Service() {
                     val startYeYaCallMessage = reader.readLine()
                     if (startYeYaCallMessage == "startYeYaCall") {
                         Log.d(TAG, "Received startYeYaCall message")
-                        startYeYaCallService()
+                        startYeYaCallService(client)  // Pass the client socket here
                         stopOverlayService()
                         receiveScreenSharing(client)
                     }
@@ -144,8 +144,12 @@ class ServerService : Service() {
         }
     }
 
-    private fun startYeYaCallService() {
-        val intent = Intent(this, YeYaCallService::class.java)
+    private fun startYeYaCallService(client: Socket) {
+        SocketManager.setClientSocket(client)
+        val intent = Intent(this, YeYaCallService::class.java).apply {
+            putExtra("clientScreenWidth", clientScreenWidth)
+            putExtra("clientScreenHeight", clientScreenHeight)
+        }
         startForegroundService(intent)
     }
 
