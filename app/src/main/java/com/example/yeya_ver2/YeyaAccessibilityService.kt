@@ -8,9 +8,12 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 import android.graphics.Path
+import android.graphics.Rect
+import android.os.SystemClock
 import android.view.MotionEvent
 
 class YeyaAccessibilityService : AccessibilityService() {
+
     private val TAG = "YeyaAccessibilityService"
     private var currentCaptureId: Int = 0
     private var currentGesture: GestureDescription? = null
@@ -18,11 +21,7 @@ class YeyaAccessibilityService : AccessibilityService() {
 
     companion object {
         private var instance: YeyaAccessibilityService? = null
-
-        fun getInstance(): YeyaAccessibilityService? {
-            Log.d("YeyaAccessibilityService", "getInstance called, instance is ${if (instance == null) "null" else "not null"}")
-            return instance
-        }
+        fun getInstance(): YeyaAccessibilityService? = instance
     }
 
     override fun onServiceConnected() {
@@ -31,8 +30,7 @@ class YeyaAccessibilityService : AccessibilityService() {
         val info = AccessibilityServiceInfo()
         info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        info.flags = AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
         serviceInfo = info
         Log.d(TAG, "YeyaAccessibilityService connected")
     }
@@ -140,38 +138,66 @@ class YeyaAccessibilityService : AccessibilityService() {
     fun simulateTouch(x: Int, y: Int, action: Int) {
         Log.d(TAG, "Simulating touch: action=$action, x=$x, y=$y")
 
-        synchronized(gestureLock) {
-            if (currentGesture != null) {
-                Log.d(TAG, "Previous gesture still in progress, skipping")
-                return
-            }
+        val path = Path()
+        path.moveTo(x.toFloat(), y.toFloat())
 
-            val path = Path()
-            val gestureBuilder = GestureDescription.Builder()
-            when (action) {
-                MotionEvent.ACTION_DOWN -> {
-                    path.moveTo(x.toFloat(), y.toFloat())
-                    val pressStroke = GestureDescription.StrokeDescription(path, 0, 50)
-                    gestureBuilder.addStroke(pressStroke)
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    path.moveTo(x.toFloat(), y.toFloat())
-                    path.lineTo(x.toFloat(), y.toFloat())
-                    val moveStroke = GestureDescription.StrokeDescription(path, 0, 1)
-                    gestureBuilder.addStroke(moveStroke)
-                }
-                MotionEvent.ACTION_UP -> {
-                    path.moveTo(x.toFloat(), y.toFloat())
-                    val releaseStroke = GestureDescription.StrokeDescription(path, 0, 1)
-                    gestureBuilder.addStroke(releaseStroke)
-                }
-            }
+        val gestureBuilder = GestureDescription.Builder()
+        val gestureStroke = when (action) {
+            MotionEvent.ACTION_DOWN -> GestureDescription.StrokeDescription(path, 0, 1)
+            MotionEvent.ACTION_MOVE -> GestureDescription.StrokeDescription(path, 0, 1)
+            MotionEvent.ACTION_UP -> GestureDescription.StrokeDescription(path, 0, 1)
+            else -> null
+        }
 
-            currentGesture = gestureBuilder.build()
-            val result = dispatchGesture(currentGesture!!, gestureCallback, null)
-            Log.d(TAG, "dispatchGesture result: $result")
+        gestureStroke?.let {
+            gestureBuilder.addStroke(it)
+            val gesture = gestureBuilder.build()
+            dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    Log.d(TAG, "Gesture completed: $action")
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.d(TAG, "Gesture cancelled: $action")
+                }
+            }, null)
         }
     }
+
+    fun clickOnPosition(x: Int, y: Int) {
+        val root = rootInActiveWindow
+        if (root == null) {
+            Log.e(TAG, "Root node is null")
+            return
+        }
+
+        val node = findNodeAtPosition(root, x, y)
+        if (node != null) {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.d(TAG, "Clicked on node at ($x, $y)")
+        } else {
+            Log.e(TAG, "No clickable node found at ($x, $y)")
+        }
+    }
+
+    private fun findNodeAtPosition(node: AccessibilityNodeInfo, x: Int, y: Int): AccessibilityNodeInfo? {
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        if (rect.contains(x, y)) {
+            if (node.isClickable) {
+                return node
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i)
+                val result = findNodeAtPosition(child, x, y)
+                if (result != null) {
+                    return result
+                }
+            }
+        }
+        return null
+    }
+
+
 
     fun simulateClick(x: Int, y: Int) {
         Log.d(TAG, "Simulating click at ($x, $y)")

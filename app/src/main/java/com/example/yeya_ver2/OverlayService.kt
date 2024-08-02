@@ -528,22 +528,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
 
         when (action) {
-            MotionEvent.ACTION_DOWN -> {
-                lastX = x
-                lastY = y
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
                 YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
             }
-            MotionEvent.ACTION_MOVE -> {
-                if (x != lastX || y != lastY) {
-                    YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-                    lastX = x
-                    lastY = y
-                }
-            }
-            MotionEvent.ACTION_UP -> {
-                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-                lastX = -1
-                lastY = -1
+            // You can define a custom action for clicks if needed
+            99 -> { // Assuming 99 is your custom click action
+                YeyaAccessibilityService.getInstance()?.clickOnPosition(x, y)
             }
         }
     }
