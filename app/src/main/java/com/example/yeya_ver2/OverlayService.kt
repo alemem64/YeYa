@@ -93,7 +93,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var screenHeight: Int = 0
 
     private val imageQueue = Channel<ByteArray>(Channel.BUFFERED)
-    private val FPS = 24// Adjust this value for desired frame rate
+    private val FPS = 30// Adjust this value for desired frame rate
     private val frameInterval = 1000L / FPS
     private var isRecording = false
 
@@ -401,10 +401,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     )
                     bitmap.copyPixelsFromBuffer(buffer)
 
-                    val targetWidth = screenWidth / 2
-                    val targetHeight = screenHeight / 2
-                    val compressQuality = 50
-                    val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
+                    val compressQuality = 20 // Increase compression (lower quality)
+                    val compressedImageData = resizeAndCompressBitmap(bitmap, screenWidth, screenHeight, compressQuality)
+
+                    // Recycle the original bitmap to free up memory
+                    bitmap.recycle()
 
                     imageQueue.send(compressedImageData)
                 }
@@ -440,9 +441,17 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun resizeAndCompressBitmap(original: Bitmap, targetWidth: Int, targetHeight: Int, quality: Int): ByteArray {
-        val resized = Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true)
+        val scaleFactor = 0.5f // Reduce to 25% of original size
+        val newWidth = (original.width * scaleFactor).toInt()
+        val newHeight = (original.height * scaleFactor).toInt()
+
+        val resized = Bitmap.createScaledBitmap(original, newWidth, newHeight, true)
         val outputStream = ByteArrayOutputStream()
         resized.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+
+        // Recycle the resized bitmap to free up memory
+        resized.recycle()
+
         return outputStream.toByteArray()
     }
 
