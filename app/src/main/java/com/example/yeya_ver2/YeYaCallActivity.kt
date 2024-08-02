@@ -88,12 +88,28 @@ class YeYaCallActivity : AppCompatActivity() {
         val touchY = ((event.y - imageRect.top) / imageRect.height() * clientScreenHeight).toInt()
 
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("TOUCH|DOWN|$touchX,$touchY")
-            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("TOUCH|MOVE|$touchX,$touchY")
-            MotionEvent.ACTION_UP -> sendTouchEventToClient("TOUCH|UP|$touchX,$touchY")
+            MotionEvent.ACTION_UP -> sendClickEventToClient(touchX, touchY)
         }
 
         return true
+    }
+
+    private fun sendClickEventToClient(x: Int, y: Int) {
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    socketOutputStream?.let { outputStream ->
+                        val message = "CLICK|$x,$y\n"
+                        outputStream.write(message.toByteArray())
+                        outputStream.flush()
+                        Log.d("YeYaCallActivity", "Sent click event: $message")
+                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
+                }
+            } catch (e: Exception) {
+                Log.e("YeYaCallActivity", "Error sending click event to client", e)
+                reconnectToClient()
+            }
+        }
     }
 
     private fun sendTouchEventToClient(message: String) {

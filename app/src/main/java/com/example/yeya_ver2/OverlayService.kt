@@ -321,8 +321,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     // Start screen recording and sharing
                     startScreenRecordingAndSharing()
 
-                    // Handle incoming touch events
-                    handleIncomingTouchEvents()
+                    // Handle incoming click events
+                    handleIncomingEvents()
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -501,63 +501,116 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun handleIncomingTouchEvents() {
+    private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
                 val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
                 while (isActive) {
                     val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received touch event: $message")
-                    processTouchEvent(message)
+                    Log.d(TAG, "Received event: $message")
+                    processEvent(message)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error handling incoming touch events", e)
+                Log.e(TAG, "Error handling incoming events", e)
             }
         }
     }
 
-    private fun processTouchEvent(message: String) {
+    private fun processEvent(message: String) {
         val parts = message.split("|")
-        if (parts.size != 3 || parts[0] != "TOUCH") {
-            Log.e(TAG, "Invalid touch event message: $message")
+        if (parts.size != 2 || parts[0] != "CLICK") {
+            Log.e(TAG, "Invalid event message: $message")
             return
         }
 
-        val action = when (parts[1]) {
-            "DOWN" -> MotionEvent.ACTION_DOWN
-            "MOVE" -> MotionEvent.ACTION_MOVE
-            "UP" -> MotionEvent.ACTION_UP
-            else -> {
-                Log.e(TAG, "Unknown touch action: ${parts[1]}")
-                return
-            }
+        try {
+            val (x, y) = parts[1].split(",").map { it.toInt() }
+            Log.d(TAG, "Processing click event: x=$x, y=$y")
+            performRemoteClick(x, y)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing click coordinates: ${e.message}")
         }
-
-        val (x, y) = parts[2].split(",").map { it.toInt() }
-        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
-
-        // Use the same method that works for AI agent clicks
-        performTouchAction(x, y, action)
     }
 
-    private fun performTouchAction(x: Int, y: Int, action: Int) {
-        val path = Path()
-        path.moveTo(x.toFloat(), y.toFloat())
-
-        val gestureBuilder = GestureDescription.Builder()
-        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
-        gestureBuilder.addStroke(gestureStroke)
-
-        val gesture = gestureBuilder.build()
-        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
+    private fun performRemoteClick(x: Int, y: Int) {
+        YeyaAccessibilityService.getInstance()?.let { service ->
+            val clickPath = Path().apply {
+                moveTo(x.toFloat(), y.toFloat())
             }
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
-            }
-        }, null)
+
+            val clickStroke = GestureDescription.StrokeDescription(clickPath, 0, 100) // 100ms duration for click
+            val gestureBuilder = GestureDescription.Builder().addStroke(clickStroke)
+            val gesture = gestureBuilder.build()
+
+            service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    Log.d(TAG, "Remote click completed at ($x, $y)")
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.e(TAG, "Remote click cancelled at ($x, $y)")
+                }
+            }, null)
+        } ?: Log.e(TAG, "YeyaAccessibilityService instance is null")
     }
+
+//    private fun handleIncomingTouchEvents() {
+//        coroutineScope.launch(Dispatchers.IO) {
+//            try {
+//                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
+//                while (isActive) {
+//                    val message = reader.readLine() ?: break
+//                    Log.d(TAG, "Received touch event: $message")
+//                    processTouchEvent(message)
+//                }
+//            } catch (e: Exception) {
+//                Log.e(TAG, "Error handling incoming touch events", e)
+//            }
+//        }
+//    }
+//
+//    private fun processTouchEvent(message: String) {
+//        val parts = message.split("|")
+//        if (parts.size != 3 || parts[0] != "TOUCH") {
+//            Log.e(TAG, "Invalid touch event message: $message")
+//            return
+//        }
+//
+//        val action = when (parts[1]) {
+//            "DOWN" -> MotionEvent.ACTION_DOWN
+//            "MOVE" -> MotionEvent.ACTION_MOVE
+//            "UP" -> MotionEvent.ACTION_UP
+//            else -> {
+//                Log.e(TAG, "Unknown touch action: ${parts[1]}")
+//                return
+//            }
+//        }
+//
+//        val (x, y) = parts[2].split(",").map { it.toInt() }
+//        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
+//
+//        // Use the same method that works for AI agent clicks
+//        performTouchAction(x, y, action)
+//    }
+//
+//    private fun performTouchAction(x: Int, y: Int, action: Int) {
+//        val path = Path()
+//        path.moveTo(x.toFloat(), y.toFloat())
+//
+//        val gestureBuilder = GestureDescription.Builder()
+//        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
+//        gestureBuilder.addStroke(gestureStroke)
+//
+//        val gesture = gestureBuilder.build()
+//        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+//            override fun onCompleted(gestureDescription: GestureDescription?) {
+//                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
+//            }
+//            override fun onCancelled(gestureDescription: GestureDescription?) {
+//                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
+//            }
+//        }, null)
+//    }
 
 
     private fun vibrate() {
