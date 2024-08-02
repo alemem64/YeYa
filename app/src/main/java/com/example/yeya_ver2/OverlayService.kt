@@ -43,6 +43,7 @@ import kotlinx.coroutines.*
 import android.speech.tts.TextToSpeech
 import java.util.*
 import android.Manifest
+import android.accessibilityservice.GestureDescription
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.util.DisplayMetrics
@@ -60,6 +61,7 @@ import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
+import android.graphics.Path
 
 
 
@@ -506,11 +508,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 while (isActive) {
                     val message = reader.readLine() ?: break
                     Log.d(TAG, "Received touch event: $message")
-                    when {
-                        message.startsWith("TOUCH_DOWN|") -> processTouchEvent(message, MotionEvent.ACTION_DOWN)
-                        message.startsWith("TOUCH_MOVE|") -> processTouchEvent(message, MotionEvent.ACTION_MOVE)
-                        message.startsWith("TOUCH_UP|") -> processTouchEvent(message, MotionEvent.ACTION_UP)
-                    }
+                    processTouchEvent(message)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming touch events", e)
@@ -518,24 +516,47 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun processTouchEvent(message: String) {
+        val parts = message.split("|")
+        if (parts.size != 3 || parts[0] != "TOUCH") {
+            Log.e(TAG, "Invalid touch event message: $message")
+            return
+        }
 
-
-    private var lastX: Int = -1
-    private var lastY: Int = -1
-
-    private fun processTouchEvent(message: String, action: Int) {
-        val (x, y) = message.split("|")[1].split(",").map { it.toInt() }
-        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
-
-        when (action) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
-                YeyaAccessibilityService.getInstance()?.simulateTouch(x, y, action)
-            }
-            // You can define a custom action for clicks if needed
-            99 -> { // Assuming 99 is your custom click action
-                YeyaAccessibilityService.getInstance()?.clickOnPosition(x, y)
+        val action = when (parts[1]) {
+            "DOWN" -> MotionEvent.ACTION_DOWN
+            "MOVE" -> MotionEvent.ACTION_MOVE
+            "UP" -> MotionEvent.ACTION_UP
+            else -> {
+                Log.e(TAG, "Unknown touch action: ${parts[1]}")
+                return
             }
         }
+
+        val (x, y) = parts[2].split(",").map { it.toInt() }
+        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
+
+        // Use the same method that works for AI agent clicks
+        performTouchAction(x, y, action)
+    }
+
+    private fun performTouchAction(x: Int, y: Int, action: Int) {
+        val path = Path()
+        path.moveTo(x.toFloat(), y.toFloat())
+
+        val gestureBuilder = GestureDescription.Builder()
+        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
+        gestureBuilder.addStroke(gestureStroke)
+
+        val gesture = gestureBuilder.build()
+        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
+            }
+        }, null)
     }
 
 

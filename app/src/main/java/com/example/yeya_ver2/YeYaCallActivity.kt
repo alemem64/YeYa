@@ -70,7 +70,6 @@ class YeYaCallActivity : AppCompatActivity() {
         val imageWidth = screenShareImageView.width
         val imageHeight = screenShareImageView.height
 
-        // Get the image bounds within the ImageView
         val drawable = screenShareImageView.drawable
         if (drawable == null) {
             Log.e("YeYaCallActivity", "No image loaded in ImageView")
@@ -80,29 +79,18 @@ class YeYaCallActivity : AppCompatActivity() {
         val imageRect = RectF()
         screenShareImageView.imageMatrix.mapRect(imageRect, RectF(drawable.bounds))
 
-        // Check if the touch is within the image bounds
         if (event.x < imageRect.left || event.x > imageRect.right ||
             event.y < imageRect.top || event.y > imageRect.bottom) {
-            return false  // Touch is outside the image area
+            return false
         }
 
-        // Calculate the touch position relative to the image, not the ImageView
         val touchX = ((event.x - imageRect.left) / imageRect.width() * clientScreenWidth).toInt()
         val touchY = ((event.y - imageRect.top) / imageRect.height() * clientScreenHeight).toInt()
 
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                Log.d("YeYaCallActivity", "TouchDetected ($touchX, $touchY)")
-                sendTouchEventToClient("TOUCH_DOWN|$touchX,$touchY")
-            }
-            MotionEvent.ACTION_UP -> {
-                Log.d("YeYaCallActivity", "TouchReleased ($touchX, $touchY)")
-                sendTouchEventToClient("TOUCH_UP|$touchX,$touchY")
-            }
-            MotionEvent.ACTION_MOVE -> {
-                Log.d("YeYaCallActivity", "TouchMoved ($touchX, $touchY)")
-                sendTouchEventToClient("TOUCH_MOVE|$touchX,$touchY")
-            }
+            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("TOUCH|DOWN|$touchX,$touchY")
+            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("TOUCH|MOVE|$touchX,$touchY")
+            MotionEvent.ACTION_UP -> sendTouchEventToClient("TOUCH|UP|$touchX,$touchY")
         }
 
         return true
