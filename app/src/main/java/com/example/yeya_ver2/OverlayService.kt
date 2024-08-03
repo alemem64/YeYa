@@ -846,7 +846,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun YVC_startComponents() {
         YVC_isActive = true
-        cameraManager.startCamera()
+        cameraManager.startCamera { imageData ->
+            coroutineScope.launch {
+                YVC_videoQueue.send(imageData)
+            }
+        }
         YVC_launchVideoCaptureProducer()
         YVC_launchAudioCaptureProducer()
         YVC_launchVideoConsumer()

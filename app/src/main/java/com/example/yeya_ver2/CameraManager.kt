@@ -27,6 +27,7 @@ class CameraManager(private val context: Context) {
     private lateinit var cameraManager: Camera2Manager
 
 
+
     private fun checkCameraPermission(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
@@ -48,10 +49,12 @@ class CameraManager(private val context: Context) {
         imageReader = ImageReader.newInstance(360, 480, ImageFormat.JPEG, 2)
         imageReader.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
-            val compressedImageData = compressImage(image)
-            onImageAvailable(compressedImageData)
+            val buffer = image.planes[0].buffer
+            val imageData = ByteArray(buffer.remaining())
+            buffer.get(imageData)
+            onImageAvailable(imageData)
             image.close()
-        }, cameraHandler)
+        }, null)
 
         cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
