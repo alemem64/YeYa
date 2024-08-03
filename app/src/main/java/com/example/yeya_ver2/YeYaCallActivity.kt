@@ -1,5 +1,6 @@
 package com.example.yeya_ver2
 
+import AudioManager
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Path
@@ -18,9 +19,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
+import java.net.Socket
+import java.nio.ByteBuffer
 
 
 class YeYaCallActivity : AppCompatActivity() {
+    private val TAG = "YeYaCallActivity"
     private lateinit var screenShareImageView: ImageView
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
@@ -29,6 +33,8 @@ class YeYaCallActivity : AppCompatActivity() {
     private var isReconnecting = false
     private val reconnectDelay = 5000L // 5 seconds
     private lateinit var cameraManager: CameraManager
+    private lateinit var audioManager: AudioManager
+    private var clientSocket: Socket? = null
 
     companion object {
         var instance: YeYaCallActivity? = null
@@ -53,6 +59,7 @@ class YeYaCallActivity : AppCompatActivity() {
         handleIntent(intent)
 
         cameraManager = CameraManager(this)
+        audioManager = AudioManager(this)
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
@@ -213,6 +220,45 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private fun stopCameraCapture() {
         cameraManager.stopCamera()
+    }
+
+    private suspend fun sendImageToClient(imageData: ByteArray) {
+        try {
+            val socket = clientSocket ?: run {
+                Log.e(TAG, "Client socket is null")
+                return
+            }
+            if (!socket.isClosed) {
+                val outputStream = socket.getOutputStream()
+                val dataSize = imageData.size
+                outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                outputStream.write(imageData)
+                outputStream.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending image to client", e)
+        }
+    }
+
+    private fun startAudioCapture() {
+        coroutineScope.launch {
+            audioManager.startAudioCapture { audioData ->
+                sendAudioToClient(audioData)
+            }
+        }
+    }
+
+    private suspend fun sendAudioToClient(audioData: ByteArray) {
+        // Implement the logic to send audio data to the client
+        // You can use the existing socket connection or create a new one for audio
+    }
+
+    private fun stopAudioCapture() {
+        audioManager.stopAudioCapture()
+    }
+
+    private suspend fun receiveAudioFromClient(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
     }
 
     override fun onDestroy() {

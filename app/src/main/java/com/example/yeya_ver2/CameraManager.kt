@@ -1,6 +1,7 @@
 package com.example.yeya_ver2
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.hardware.camera2.*
 import android.media.ImageReader
@@ -8,8 +9,10 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.util.Size
+import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import android.hardware.camera2.CameraManager as Camera2Manager
 
 class CameraManager(private val context: Context) {
     private val TAG = "CameraManager"
@@ -18,9 +21,22 @@ class CameraManager(private val context: Context) {
     private lateinit var imageReader: ImageReader
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
+    private lateinit var cameraManager: Camera2Manager
+
+    private fun checkCameraPermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+    }
 
     fun startCamera(onImageAvailable: (ByteArray) -> Unit) {
-        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        if (!checkCameraPermission(context)) {
+            Log.e(TAG, "Camera permission not granted")
+            return
+        }
+
+        cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as Camera2Manager
         val cameraId = cameraManager.cameraIdList.first {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
         }

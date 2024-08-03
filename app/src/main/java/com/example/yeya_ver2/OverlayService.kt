@@ -1,5 +1,6 @@
 package com.example.yeya_ver2
 
+import AudioManager
 import android.app.*
 import android.content.Context
 import android.content.Intent
@@ -107,6 +108,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val CLICK_TIME_THRESHOLD = 200 // milliseconds
 
     private lateinit var cameraManager: CameraManager
+    private lateinit var audioManager: AudioManager
 
 
 
@@ -124,6 +126,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         startBufferProcessing()
         cameraManager = CameraManager(this)
+        audioManager = AudioManager(this)
     }
 
     override fun onInit(status: Int) {
@@ -621,6 +624,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun stopCameraCapture() {
         cameraManager.stopCamera()
+    }
+
+    private fun startAudioCapture() {
+        coroutineScope.launch {
+            audioManager.startAudioCapture { audioData ->
+                sendAudioToServer(audioData)
+            }
+        }
+    }
+
+    private suspend fun sendAudioToServer(audioData: ByteArray) {
+        // Implement the logic to send audio data to the server
+        // You can use the existing socket connection or create a new one for audio
+    }
+
+    private fun stopAudioCapture() {
+        audioManager.stopAudioCapture()
+    }
+
+    private suspend fun receiveAudioFromServer(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
     }
 
 
