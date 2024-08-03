@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.ImageView
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +36,9 @@ class YeYaCallActivity : AppCompatActivity() {
     private lateinit var cameraManager: CameraManager
     private lateinit var audioManager: AudioManager
     private var clientSocket: Socket? = null
-
+    private lateinit var remoteVideoView: ImageView
+    private lateinit var localVideoView: ImageView
+    private lateinit var endCallButton: Button
     companion object {
         var instance: YeYaCallActivity? = null
     }
@@ -47,7 +50,7 @@ class YeYaCallActivity : AppCompatActivity() {
         instance = this
         setContentView(R.layout.activity_yeyacall)
 
-        screenShareImageView = findViewById(R.id.screenShareImageView)
+
         if (screenShareImageView == null) {
             Log.e("YeYaCallActivity", "screenShareImageView not found in layout")
             finish()
@@ -60,6 +63,14 @@ class YeYaCallActivity : AppCompatActivity() {
 
         cameraManager = CameraManager(this)
         audioManager = AudioManager(this)
+
+        remoteVideoView = findViewById(R.id.remoteVideoView)
+        localVideoView = findViewById(R.id.localVideoView)
+        endCallButton = findViewById(R.id.endCallButton)
+
+        endCallButton.setOnClickListener {
+            endCall()
+        }
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
@@ -259,6 +270,25 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private suspend fun receiveAudioFromClient(audioData: ByteArray) {
         audioManager.playAudio(audioData)
+    }
+
+    private fun endCall() {
+        // Implement call ending logic
+        finish()
+    }
+
+    private suspend fun updateVideoDisplay(imageData: ByteArray) {
+        withContext(Dispatchers.Main) {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+            remoteVideoView.setImageBitmap(bitmap)
+        }
+    }
+
+    private suspend fun updateLocalVideoDisplay(imageData: ByteArray) {
+        withContext(Dispatchers.Main) {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+            localVideoView.setImageBitmap(bitmap)
+        }
     }
 
     override fun onDestroy() {

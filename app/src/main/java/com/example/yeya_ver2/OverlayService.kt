@@ -46,6 +46,7 @@ import java.util.*
 import android.Manifest
 import android.accessibilityservice.GestureDescription
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.util.DisplayMetrics
 import androidx.core.app.ActivityCompat
@@ -64,7 +65,7 @@ import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
 import android.os.SystemClock
-
+import android.widget.ImageView
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -109,6 +110,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private lateinit var cameraManager: CameraManager
     private lateinit var audioManager: AudioManager
+    private lateinit var videoOverlayView: View
+    private lateinit var remoteVideoView: ImageView
+    private var isFullScreen = false
+    private var originalParams: WindowManager.LayoutParams? = null
 
 
 
@@ -127,6 +132,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         startBufferProcessing()
         cameraManager = CameraManager(this)
         audioManager = AudioManager(this)
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        setupVideoOverlay()
     }
 
     override fun onInit(status: Int) {
@@ -247,6 +254,79 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
         }
     }
+    private fun setupVideoOverlay() {
+        videoOverlayView = LayoutInflater.from(this).inflate(R.layout.video_overlay, null)
+        remoteVideoView = videoOverlayView.findViewById(R.id.remoteVideoView)
+
+        val params = WindowManager.LayoutParams(
+            360, 480,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = 100
+        params.y = 100
+
+        windowManager.addView(videoOverlayView, params)
+
+        setupDragListener(videoOverlayView, params)
+
+        videoOverlayView.setOnClickListener {
+            toggleFullScreen()
+        }
+    }
+
+    private fun toggleFullScreen() {
+        if (isFullScreen) {
+            // Restore original size and position
+            originalParams?.let { params ->
+                windowManager.updateViewLayout(videoOverlayView, params)
+            }
+        } else {
+            // Save original params and go full screen
+            val currentParams = videoOverlayView.layoutParams as WindowManager.LayoutParams
+            originalParams = WindowManager.LayoutParams().apply {
+                copyFrom(currentParams)
+            }
+            val fullScreenParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+            windowManager.updateViewLayout(videoOverlayView, fullScreenParams)
+        }
+        isFullScreen = !isFullScreen
+    }
+
+    private fun setupDragListener(view: View, params: WindowManager.LayoutParams) {
+        var initialX: Int = 0
+        var initialY: Int = 0
+        var initialTouchX: Float = 0f
+        var initialTouchY: Float = 0f
+
+        view.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initialX + (event.rawX - initialTouchX).toInt()
+                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(videoOverlayView, params)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
 
 
 
@@ -310,6 +390,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         withContext(Dispatchers.IO) {
             try {
                 clientSocket = Socket(serverAddress, serverPort)
+                SocketManager.setClientSocket(clientSocket!!)
+                Log.d(TAG, "Successfully connected to server")
+
                 val out = PrintWriter(clientSocket?.getOutputStream(), true)
                 val input = BufferedReader(InputStreamReader(clientSocket?.getInputStream()))
 
@@ -317,7 +400,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 val response = input.readLine()
 
                 if (response == "Server connected to Client") {
-                    Log.d(TAG, "Successfully connected to server")
+                    Log.d(TAG, "Server acknowledged connection")
 
                     // Send screen dimensions
                     val (width, height) = getScreenDimensions()
@@ -331,7 +414,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     // Start screen recording and sharing
                     startScreenRecordingAndSharing()
 
-                    // Handle incoming click events
+                    // Start video call components
+                    startVideoCallComponents()
+
+                    // Handle incoming events
                     handleIncomingEvents()
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
@@ -613,11 +699,30 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun startVideoCallComponents() {
+        startCameraCapture()
+        startAudioCapture()
+        receiveVideoAndAudio()
+    }
+
     private fun startCameraCapture() {
         cameraManager.startCamera { imageData ->
-            // Send imageData to server
             coroutineScope.launch {
-                sendImageToServer(imageData)
+                sendVideoFrame(imageData)
+            }
+        }
+    }
+
+    private suspend fun sendVideoFrame(imageData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                val outputStream = SocketManager.getOutputStream()
+                outputStream?.write("VIDEO".toByteArray())
+                outputStream?.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
+                outputStream?.write(imageData)
+                outputStream?.flush()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending video frame", e)
             }
         }
     }
@@ -629,9 +734,58 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun startAudioCapture() {
         coroutineScope.launch {
             audioManager.startAudioCapture { audioData ->
-                sendAudioToServer(audioData)
+                sendAudioData(audioData)
             }
         }
+    }
+
+    private suspend fun sendAudioData(audioData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                val outputStream = SocketManager.getOutputStream()
+                outputStream?.write("AUDIO".toByteArray())
+                outputStream?.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
+                outputStream?.write(audioData)
+                outputStream?.flush()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending audio data", e)
+            }
+        }
+    }
+
+    private fun receiveVideoAndAudio() {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = SocketManager.getClientSocket()?.getInputStream()
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val type = String(buffer, 0, inputStream?.read(buffer, 0, 5) ?: 0)
+                    val sizeBuffer = ByteArray(4)
+                    inputStream?.read(sizeBuffer)
+                    val size = ByteBuffer.wrap(sizeBuffer).int
+                    val data = ByteArray(size)
+                    inputStream?.read(data)
+
+                    when (type) {
+                        "VIDEO" -> updateVideoDisplay(data)
+                        "AUDIO" -> playAudioData(data)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error receiving video/audio data", e)
+            }
+        }
+    }
+
+    private suspend fun updateVideoDisplay(imageData: ByteArray) {
+        withContext(Dispatchers.Main) {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+            remoteVideoView.setImageBitmap(bitmap)
+        }
+    }
+
+    private suspend fun playAudioData(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
     }
 
     private suspend fun sendAudioToServer(audioData: ByteArray) {
@@ -948,6 +1102,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         clientSocket?.close()
         coroutineScope.cancel()
         stopScreenSharing()
+        windowManager.removeView(videoOverlayView)
     }
 
     private fun stopScreenSharing() {

@@ -3,7 +3,10 @@ package com.example.yeya_ver2
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.hardware.camera2.*
+import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
@@ -44,10 +47,8 @@ class CameraManager(private val context: Context) {
         imageReader = ImageReader.newInstance(360, 480, ImageFormat.JPEG, 2)
         imageReader.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-            onImageAvailable(bytes)
+            val compressedImageData = compressImage(image)
+            onImageAvailable(compressedImageData)
             image.close()
         }, cameraHandler)
 
@@ -90,5 +91,22 @@ class CameraManager(private val context: Context) {
             Log.e(TAG, "Error closing camera: ${e.message}")
         }
         cameraThread.quitSafely()
+    }
+
+    private fun compressImage(image: Image): ByteArray {
+        val planes = image.planes
+        val buffer = planes[0].buffer
+        val data = ByteArray(buffer.remaining())
+        buffer.get(data)
+        val yuvImage = YuvImage(
+            data,
+            ImageFormat.NV21,
+            image.width,
+            image.height,
+            null
+        )
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 80, out)
+        return out.toByteArray()
     }
 }

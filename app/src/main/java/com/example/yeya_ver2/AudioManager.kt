@@ -7,6 +7,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
+import android.media.*
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.nio.ByteOrder
+import android.Manifest
+import android.media.*
+import kotlinx.coroutines.withContext
+
 
 class AudioManager(private val context: Context) {
     private val TAG = "AudioManager"
@@ -17,18 +25,22 @@ class AudioManager(private val context: Context) {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
-    private fun checkAudioPermission(context: Context): Boolean {
+
+
+
+    private fun checkAudioRecordPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
-            android.Manifest.permission.RECORD_AUDIO
+            Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
     }
 
     suspend fun startAudioCapture(onAudioAvailable: suspend (ByteArray) -> Unit) {
-        if (!checkAudioPermission(context)) {
-            Log.e(TAG, "Audio permission not granted")
+        if (!checkAudioRecordPermission()) {
+            Log.e(TAG, "RECORD_AUDIO permission not granted")
             return
         }
+
         withContext(Dispatchers.IO) {
             audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
@@ -45,15 +57,28 @@ class AudioManager(private val context: Context) {
 
             audioRecord?.startRecording()
 
-            val buffer = ByteArray(bufferSize)
+            val buffer = ShortArray(bufferSize / 2)
             while (true) {
-                val bytesRead = audioRecord?.read(buffer, 0, bufferSize) ?: -1
+                val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: -1
                 if (bytesRead > 0) {
-                    onAudioAvailable(buffer.copyOf(bytesRead))
+                    val compressedData = compressAudio(buffer, bytesRead)
+                    onAudioAvailable(compressedData)
                 }
             }
         }
     }
+
+    private fun compressAudio(audioData: ShortArray, size: Int): ByteArray {
+        val byteOutputStream = ByteArrayOutputStream()
+        for (i in 0 until size) {
+            val sample = (audioData[i].toInt() shr 2).toShort()
+            byteOutputStream.write(sample.toByte().toInt())
+            byteOutputStream.write((sample.toInt() shr 8).toByte().toInt())
+        }
+        return byteOutputStream.toByteArray()
+    }
+
+
 
     fun stopAudioCapture() {
         audioRecord?.stop()
@@ -84,8 +109,19 @@ class AudioManager(private val context: Context) {
             }
 
             audioTrack?.play()
-            audioTrack?.write(audioData, 0, audioData.size)
+            val decompressedData = decompressAudio(audioData)
+            audioTrack?.write(decompressedData, 0, decompressedData.size)
         }
+    }
+
+    private fun decompressAudio(compressedData: ByteArray): ShortArray {
+        val shortBuffer = ShortArray(compressedData.size / 2)
+        val byteBuffer = ByteBuffer.wrap(compressedData).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in shortBuffer.indices) {
+            val sample = byteBuffer.short
+            shortBuffer[i] = (sample.toInt() shl 2).toShort()
+        }
+        return shortBuffer
     }
 
     fun stopAudioPlayback() {

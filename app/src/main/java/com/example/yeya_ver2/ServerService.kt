@@ -37,6 +37,8 @@ class ServerService : Service() {
     private var clientScreenHeight: Int = 0
 
 
+
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -133,9 +135,9 @@ class ServerService : Service() {
                     val startYeYaCallMessage = reader.readLine()
                     if (startYeYaCallMessage == "startYeYaCall") {
                         Log.d(TAG, "Received startYeYaCall message")
-                        startYeYaCallService(client)  // Pass the client socket here
+                        startYeYaCallService(client)
                         stopOverlayService()
-                        receiveScreenSharing(client)
+                        handleVideoCallData(client)
                     }
                 }
             } catch (e: Exception) {
@@ -262,6 +264,68 @@ class ServerService : Service() {
                         Log.e(TAG, "Error in UDP discovery listener", e)
                     }
                 }
+            }
+        }
+    }
+
+    private fun handleVideoCallData(client: Socket) {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = client.getInputStream()
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val type = String(buffer, 0, inputStream.read(buffer, 0, 5))
+                    val sizeBuffer = ByteArray(4)
+                    inputStream.read(sizeBuffer)
+                    val size = ByteBuffer.wrap(sizeBuffer).int
+                    val data = ByteArray(size)
+                    inputStream.read(data)
+
+                    when (type) {
+                        "VIDEO" -> sendVideoToClient(data)
+                        "AUDIO" -> sendAudioToClient(data)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling video call data", e)
+                reconnectClient()
+            }
+        }
+    }
+
+    private fun reconnectClient() {
+        coroutineScope.launch {
+            delay(5000) // Wait 5 seconds before attempting to reconnect
+            startServer() // Restart the server
+        }
+    }
+
+    private suspend fun sendVideoToClient(videoData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                SocketManager.getClientSocket()?.getOutputStream()?.let { outputStream ->
+                    outputStream.write("VIDEO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(videoData.size).array())
+                    outputStream.write(videoData)
+                    outputStream.flush()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending video to client", e)
+            }
+        }
+    }
+
+    private suspend fun sendAudioToClient(audioData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                SocketManager.getClientSocket()?.getOutputStream()?.let { outputStream ->
+                    outputStream.write("AUDIO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
+                    outputStream.write(audioData)
+                    outputStream.flush()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending audio to client", e)
             }
         }
     }
