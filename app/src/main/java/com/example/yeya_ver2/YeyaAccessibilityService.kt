@@ -29,8 +29,10 @@ class YeyaAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         val info = AccessibilityServiceInfo()
-        info.flags = AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
-        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES
+        info.flags = AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE or
+                AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES or
+                AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
         serviceInfo = info
     }
 

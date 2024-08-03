@@ -62,7 +62,7 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
-
+import android.os.SystemClock
 
 
 
@@ -120,6 +120,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         setupOverlay()
         initializeSpeechRecognizer()
         tts = TextToSpeech(this, this)
+        startBufferProcessing()
     }
 
     override fun onInit(status: Int) {
@@ -519,50 +520,67 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private var currentGesture: GestureDescription? = null
+    private var gestureBuilder = GestureDescription.Builder()
+    private var lastTouchTime: Long = 0
+    private var lastX: Float = 0f
+    private var lastY: Float = 0f
+
     private fun processEvent(message: String) {
         val parts = message.split("|")
-        if (parts.size != 3 || parts[0] != "TOUCH") {
+        if (parts.size != 4 || parts[0] != "TOUCH") {
             Log.e(TAG, "Invalid event message: $message")
             return
         }
 
         try {
             val action = parts[1]
-            val (x, y) = parts[2].split(",").map { it.toInt() }
-            Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
+            val (x, y) = parts[2].split(",").map { it.toFloat() }
+            val touchTime = parts[3].toLong()
+
+            Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y, time=$touchTime")
 
             when (action) {
-                "DOWN" -> startGesture(x, y)
-                "MOVE" -> updateGesture(x, y)
-                "UP" -> endGesture()
+                "DOWN" -> startGesture(x, y, touchTime)
+                "MOVE" -> updateGesture(x, y, touchTime)
+                "UP" -> endGesture(x, y, touchTime)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error parsing touch coordinates: ${e.message}")
+            Log.e(TAG, "Error parsing touch event: ${e.message}")
         }
     }
 
-    private var currentGesture: GestureDescription.StrokeDescription? = null
-    private var gestureBuilder = GestureDescription.Builder()
+    private var gestureStartTime: Long = 0
 
-    private fun startGesture(x: Int, y: Int) {
-        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
-        currentGesture = GestureDescription.StrokeDescription(path, 0, 1)
-        gestureBuilder.addStroke(currentGesture!!)
+    private fun startGesture(x: Float, y: Float, touchTime: Long) {
+        gestureStartTime = SystemClock.uptimeMillis()
+        lastX = x
+        lastY = y
+        lastTouchTime = touchTime
+        val path = Path().apply { moveTo(x, y) }
+        gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 1))
     }
 
-    private fun updateGesture(x: Int, y: Int) {
-        currentGesture?.let { stroke ->
-            val newPath = Path(stroke.path).apply { lineTo(x.toFloat(), y.toFloat()) }
-            currentGesture = GestureDescription.StrokeDescription(newPath, 0, 1)
-            gestureBuilder.addStroke(currentGesture!!)
+    private fun updateGesture(x: Float, y: Float, touchTime: Long) {
+        val path = Path().apply {
+            moveTo(lastX, lastY)
+            lineTo(x, y)
         }
+        val duration = touchTime - lastTouchTime
+        val startTime = lastTouchTime - gestureStartTime
+        if (startTime >= 0) {
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, startTime, duration))
+        }
+        lastX = x
+        lastY = y
+        lastTouchTime = touchTime
     }
 
-    private fun endGesture() {
+    private fun endGesture(x: Float, y: Float, touchTime: Long) {
+        updateGesture(x, y, touchTime)
         val gesture = gestureBuilder.build()
         YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, null, null)
-        currentGesture = null
-        gestureBuilder = GestureDescription.Builder()
     }
 
     private fun performRemoteClick(x: Int, y: Int) {
@@ -585,6 +603,42 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }
             }, null)
         } ?: Log.e(TAG, "YeyaAccessibilityService instance is null")
+    }
+
+    private val touchEventBuffer = mutableListOf<Triple<String, Float, Float>>()
+    private val bufferLock = Any()
+    private val bufferProcessingJob = Job()
+    private val bufferProcessingScope = CoroutineScope(Dispatchers.Default + bufferProcessingJob)
+
+    private fun addTouchEventToBuffer(action: String, x: Float, y: Float) {
+        synchronized(bufferLock) {
+            touchEventBuffer.add(Triple(action, x, y))
+        }
+    }
+
+    private fun startBufferProcessing() {
+        bufferProcessingScope.launch {
+            while (isActive) {
+                processBufferedEvents()
+                delay(16) // Approximately 60fps
+            }
+        }
+    }
+
+    private fun processBufferedEvents() {
+        synchronized(bufferLock) {
+            if (touchEventBuffer.isNotEmpty()) {
+                val events = touchEventBuffer.toList()
+                touchEventBuffer.clear()
+                events.forEach { (action, x, y) ->
+                    when (action) {
+                        "DOWN" -> startGesture(x, y, SystemClock.uptimeMillis())
+                        "MOVE" -> updateGesture(x, y, SystemClock.uptimeMillis())
+                        "UP" -> endGesture(x, y, SystemClock.uptimeMillis())
+                    }
+                }
+            }
+        }
     }
 
 //    private fun handleIncomingTouchEvents() {

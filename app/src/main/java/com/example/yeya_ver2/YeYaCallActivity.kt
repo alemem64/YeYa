@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.RectF
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -87,10 +88,11 @@ class YeYaCallActivity : AppCompatActivity() {
         val touchX = ((event.x - imageRect.left) / imageRect.width() * clientScreenWidth).toInt()
         val touchY = ((event.y - imageRect.top) / imageRect.height() * clientScreenHeight).toInt()
 
+        val touchTime = SystemClock.uptimeMillis()
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("DOWN|$touchX,$touchY")
-            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("MOVE|$touchX,$touchY")
-            MotionEvent.ACTION_UP -> sendTouchEventToClient("UP|$touchX,$touchY")
+            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("DOWN|$touchX,$touchY|$touchTime")
+            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("MOVE|$touchX,$touchY|$touchTime")
+            MotionEvent.ACTION_UP -> sendTouchEventToClient("UP|$touchX,$touchY|$touchTime")
         }
 
 
