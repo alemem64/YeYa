@@ -129,6 +129,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var cameraHandler: Handler
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isOverlayAdded = false
+    private var isScreenSharingActive = false
 
 
 
@@ -644,9 +645,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val imageBytes = out.toByteArray()
         val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
 
-        // Rotate the bitmap 90 degrees counter-clockwise
-        val matrix = Matrix()
-        matrix.postRotate(-90f)
+        // Rotate the bitmap 90 degrees counter-clockwise and flip horizontally
+        val matrix = Matrix().apply {
+            postRotate(-90f)
+            postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
+        }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
@@ -661,12 +664,26 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
+    fun startScreenSharing() {
+        if (!isScreenSharingActive) {
+            isScreenSharingActive = true
+            startScreenRecordingAndSharing()
+        }
+    }
+
+    fun stopScreenSharing() {
+        isScreenSharingActive = false
+        virtualDisplay?.release()
+        imageReader?.close()
+    }
+
 
 
     private val imageLock = Any()
     private var isProcessingImage = false
 
     private fun startScreenRecordingAndSharing() {
+
         val metrics = resources.displayMetrics
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
@@ -706,13 +723,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun launchImageProducer() {
         coroutineScope.launch(Dispatchers.Default) {
             var lastCaptureTime = System.currentTimeMillis()
-            while (isRecording) {
+            while (isRecording && isScreenSharingActive) {
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastCaptureTime >= frameInterval) {
                     captureAndEnqueueFrame()
                     lastCaptureTime = currentTime
                 }
-                delay(1) // Small delay to prevent busy waiting
+                delay(1)
             }
         }
     }
@@ -729,27 +746,44 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun captureAndEnqueueFrame() {
         withContext(Dispatchers.Default) {
             try {
-                imageReader?.acquireLatestImage()?.use { image ->
+                val image = imageReader?.acquireLatestImage()
+                if (image != null) {
                     val planes = image.planes
                     val buffer = planes[0].buffer
                     val pixelStride = planes[0].pixelStride
                     val rowStride = planes[0].rowStride
                     val rowPadding = rowStride - pixelStride * screenWidth
 
+                    val bufferSize = buffer.remaining()
+                    val bitmapWidth = screenWidth + rowPadding / pixelStride
+                    val bitmapHeight = bufferSize / rowStride
+
+                    if (bitmapHeight > screenHeight) {
+                        Log.w(TAG, "Bitmap height larger than screen height, truncating")
+                    }
+
                     val bitmap = Bitmap.createBitmap(
-                        screenWidth + rowPadding / pixelStride, screenHeight,
+                        bitmapWidth,
+                        minOf(bitmapHeight, screenHeight),
                         Bitmap.Config.ARGB_8888
                     )
-                    bitmap.copyPixelsFromBuffer(buffer)
 
-                    val compressQuality = 20 // Increase compression (lower quality)
+                    try {
+                        bitmap.copyPixelsFromBuffer(buffer)
+                    } catch (e: RuntimeException) {
+                        Log.e(TAG, "Error copying pixels from buffer", e)
+                        return@withContext
+                    }
+
+                    val compressQuality = 20
                     val compressedImageData = resizeAndCompressBitmap(bitmap, screenWidth, screenHeight, compressQuality)
 
-                    // Recycle the original bitmap to free up memory
                     bitmap.recycle()
 
                     imageQueue.send(compressedImageData)
+                    image.close()
                 }
+
             } catch (e: Exception) {
                 Log.e(TAG, "Error capturing frame", e)
             }
@@ -782,7 +816,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun resizeAndCompressBitmap(original: Bitmap, targetWidth: Int, targetHeight: Int, quality: Int): ByteArray {
-        val scaleFactor = 0.5f // Reduce to 25% of original size
+        val scaleFactor = 0.5f // Reduce to 50% of original size
         val newWidth = (original.width * scaleFactor).toInt()
         val newHeight = (original.height * scaleFactor).toInt()
 
@@ -1228,15 +1262,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
         windowManager.removeView(overlayView)
-        mediaProjection?.stop()
         virtualDisplay?.release()
         speechRecognizer.destroy()
         coroutineScope.cancel()
-        networkCoroutineScope.cancel() // Add this line
+        networkCoroutineScope.cancel()
         tts.stop()
         tts.shutdown()
         clientSocket?.close()
-        coroutineScope.cancel()
         stopScreenSharing()
         cameraDevice?.close()
         if (::cameraHandler.isInitialized) {
@@ -1247,14 +1279,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             windowManager.removeView(videoCallOverlayView)
             isOverlayAdded = false
         }
+        imageReader?.close()
+        mediaProjection?.stop()
+        isScreenSharingActive = false
+        imageReader?.close()
     }
 
-    private fun stopScreenSharing() {
-        virtualDisplay?.release()
-        imageReader?.close()
-        clientSocket?.close()
-        clientSocket = null
-    }
+
 
 }
 
