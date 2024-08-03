@@ -12,6 +12,7 @@ import android.graphics.Rect
 import android.os.SystemClock
 import android.view.MotionEvent
 
+
 class YeyaAccessibilityService : AccessibilityService() {
     companion object {
         private var instance: YeyaAccessibilityService? = null
@@ -28,11 +29,9 @@ class YeyaAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         val info = AccessibilityServiceInfo()
-        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
         info.flags = AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
+        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES
         serviceInfo = info
-        Log.d("YeyaAccessibilityService", "Service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

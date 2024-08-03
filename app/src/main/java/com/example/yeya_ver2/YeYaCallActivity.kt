@@ -88,8 +88,11 @@ class YeYaCallActivity : AppCompatActivity() {
         val touchY = ((event.y - imageRect.top) / imageRect.height() * clientScreenHeight).toInt()
 
         when (event.action) {
-            MotionEvent.ACTION_UP -> sendClickEventToClient(touchX, touchY)
+            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("DOWN|$touchX,$touchY")
+            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("MOVE|$touchX,$touchY")
+            MotionEvent.ACTION_UP -> sendTouchEventToClient("UP|$touchX,$touchY")
         }
+
 
         return true
     }
@@ -117,7 +120,7 @@ class YeYaCallActivity : AppCompatActivity() {
             try {
                 withContext(Dispatchers.IO) {
                     socketOutputStream?.let { outputStream ->
-                        outputStream.write((message + "\n").toByteArray())
+                        outputStream.write(("TOUCH|$message\n").toByteArray())
                         outputStream.flush()
                     } ?: Log.e("YeYaCallActivity", "OutputStream is null")
                 }

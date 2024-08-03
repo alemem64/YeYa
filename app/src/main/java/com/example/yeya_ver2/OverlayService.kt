@@ -65,6 +65,7 @@ import android.graphics.Path
 
 
 
+
 class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val TAG = "OverlayService"
     private lateinit var windowManager: WindowManager
@@ -104,6 +105,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var lastTouchDownX: Int = 0
     private var lastTouchDownY: Int = 0
     private val CLICK_TIME_THRESHOLD = 200 // milliseconds
+
+
 
 
 
@@ -518,18 +521,48 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun processEvent(message: String) {
         val parts = message.split("|")
-        if (parts.size != 2 || parts[0] != "CLICK") {
+        if (parts.size != 3 || parts[0] != "TOUCH") {
             Log.e(TAG, "Invalid event message: $message")
             return
         }
 
         try {
-            val (x, y) = parts[1].split(",").map { it.toInt() }
-            Log.d(TAG, "Processing click event: x=$x, y=$y")
-            YeyaAccessibilityService.getInstance()?.performClickAtCoordinates(x, y)
+            val action = parts[1]
+            val (x, y) = parts[2].split(",").map { it.toInt() }
+            Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
+
+            when (action) {
+                "DOWN" -> startGesture(x, y)
+                "MOVE" -> updateGesture(x, y)
+                "UP" -> endGesture()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error parsing click coordinates: ${e.message}")
+            Log.e(TAG, "Error parsing touch coordinates: ${e.message}")
         }
+    }
+
+    private var currentGesture: GestureDescription.StrokeDescription? = null
+    private var gestureBuilder = GestureDescription.Builder()
+
+    private fun startGesture(x: Int, y: Int) {
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        currentGesture = GestureDescription.StrokeDescription(path, 0, 1)
+        gestureBuilder.addStroke(currentGesture!!)
+    }
+
+    private fun updateGesture(x: Int, y: Int) {
+        currentGesture?.let { stroke ->
+            val newPath = Path(stroke.path).apply { lineTo(x.toFloat(), y.toFloat()) }
+            currentGesture = GestureDescription.StrokeDescription(newPath, 0, 1)
+            gestureBuilder.addStroke(currentGesture!!)
+        }
+    }
+
+    private fun endGesture() {
+        val gesture = gestureBuilder.build()
+        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, null, null)
+        currentGesture = null
+        gestureBuilder = GestureDescription.Builder()
     }
 
     private fun performRemoteClick(x: Int, y: Int) {
