@@ -45,6 +45,8 @@ import java.util.*
 import android.Manifest
 import android.accessibilityservice.GestureDescription
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
 import android.net.wifi.WifiManager
 import android.util.DisplayMetrics
 import androidx.core.app.ActivityCompat
@@ -62,7 +64,14 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
 import android.os.SystemClock
+import android.view.Surface
+import android.widget.ImageView
+import java.util.concurrent.CountDownLatch
 
 
 
@@ -111,6 +120,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var isVideoCallFullscreen = false
     private var originalX = 0
     private var originalY = 0
+
 
 
 
@@ -336,10 +346,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                     // Start Video call
                     withContext(Dispatchers.Main) {
-                        startClientSendVideoCall()
-                        startClientSendSpeakCall()
-                        startClientReceiveVideoCall()
-                        startClientReceiveSpeakCall()
+                        setupVideoCallOverlay()
+                        startClientCamera()
                     }
 
 
@@ -467,17 +475,113 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         isVideoCallFullscreen = !isVideoCallFullscreen
     }
 
-    private fun startClientSendSpeakCall() {
-        Log.d(TAG, "Starting client send speak call")
+    private fun startClientCamera() {
+        val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = cameraManager.cameraIdList.firstOrNull {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        } ?: run {
+            Log.e(TAG, "Front camera not found")
+            return
+        }
+
+        try {
+            val imageReader = ImageReader.newInstance(480, 480, ImageFormat.JPEG, 2)
+            val cameraDevice = openCamera(cameraManager, cameraId) ?: run {
+                Log.e(TAG, "Failed to open camera")
+                return
+            }
+
+            val captureRequest = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(imageReader.surface)
+            }
+
+            val captureSession = createCaptureSession(cameraDevice, listOf(imageReader.surface))
+            captureSession.setRepeatingRequest(captureRequest.build(), null, null)
+
+            imageReader.setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage()
+                val bitmap = imageToBitmap(image)
+                updateCameraPreview(bitmap)
+                image.close()
+            }, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting camera", e)
+        }
     }
 
-    private fun startClientReceiveVideoCall() {
-        Log.d(TAG, "Starting client receive video call")
+    private fun openCamera(cameraManager: CameraManager, cameraId: String): CameraDevice? {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Camera permission not granted")
+            return null
+        }
+
+        val latch = CountDownLatch(1)
+        var cameraDevice: CameraDevice? = null
+
+        try {
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    cameraDevice = camera
+                    latch.countDown()
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    camera.close()
+                    latch.countDown()
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera open error: $error")
+                    camera.close()
+                    latch.countDown()
+                }
+            }, null)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Security exception when opening camera", e)
+            return null
+        }
+
+        latch.await()
+        return cameraDevice
     }
 
-    private fun startClientReceiveSpeakCall() {
-        Log.d(TAG, "Starting client receive speak call")
+    private fun createCaptureSession(cameraDevice: CameraDevice, surfaces: List<Surface>): CameraCaptureSession {
+        val latch = CountDownLatch(1)
+        var captureSession: CameraCaptureSession? = null
+
+        cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                captureSession = session
+                latch.countDown()
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                // Handle configuration failure
+            }
+        }, null)
+
+        latch.await()
+        return captureSession!!
     }
+
+    private fun imageToBitmap(image: Image): Bitmap {
+        val buffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.capacity())
+        buffer.get(bytes)
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, null)
+    }
+
+    private fun updateCameraPreview(bitmap: Bitmap) {
+        val clientVideoBox = videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)
+        clientVideoBox.setImageBitmap(bitmap)
+
+        if (isVideoCallFullscreen) {
+            val fullscreenClientVideoBox = fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)
+            fullscreenClientVideoBox.setImageBitmap(bitmap)
+        }
+    }
+
+
 
 
     private val imageLock = Any()
