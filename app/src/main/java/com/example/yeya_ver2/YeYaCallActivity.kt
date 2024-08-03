@@ -2,6 +2,7 @@ package com.example.yeya_ver2
 
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.graphics.Path
 import android.graphics.RectF
 import android.os.Bundle
 import android.os.SystemClock
@@ -62,6 +63,9 @@ class YeYaCallActivity : AppCompatActivity() {
         handleIntent(intent)
     }
 
+    private var isTracking = false
+    private val touchPath = Path()
+
     private fun onTouchEvent(view: View, event: MotionEvent): Boolean {
         if (clientScreenWidth == 0 || clientScreenHeight == 0) {
             Log.e("YeYaCallActivity", "Client screen dimensions not set")
@@ -87,12 +91,25 @@ class YeYaCallActivity : AppCompatActivity() {
 
         val touchX = ((event.x - imageRect.left) / imageRect.width() * clientScreenWidth).toInt()
         val touchY = ((event.y - imageRect.top) / imageRect.height() * clientScreenHeight).toInt()
-
         val touchTime = SystemClock.uptimeMillis()
+
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> sendTouchEventToClient("DOWN|$touchX,$touchY|$touchTime")
-            MotionEvent.ACTION_MOVE -> sendTouchEventToClient("MOVE|$touchX,$touchY|$touchTime")
-            MotionEvent.ACTION_UP -> sendTouchEventToClient("UP|$touchX,$touchY|$touchTime")
+            MotionEvent.ACTION_DOWN -> {
+                isTracking = true
+                touchPath.moveTo(touchX.toFloat(), touchY.toFloat())
+                sendTouchEventToClient("DOWN|$touchX,$touchY|$touchTime")
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isTracking) {
+                    touchPath.lineTo(touchX.toFloat(), touchY.toFloat())
+                    sendTouchEventToClient("MOVE|$touchX,$touchY|$touchTime")
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isTracking = false
+                sendTouchEventToClient("UP|$touchX,$touchY|$touchTime")
+                touchPath.reset()
+            }
         }
 
 
