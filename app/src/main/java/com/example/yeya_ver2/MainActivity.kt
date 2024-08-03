@@ -202,8 +202,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun isAccessibilityServiceEnabled(): Boolean {
         val accessibilityManager = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(
-            AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         return enabledServices.any { it.id == "$packageName/.YeyaAccessibilityService" }
     }
 

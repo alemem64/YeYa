@@ -526,7 +526,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         try {
             val (x, y) = parts[1].split(",").map { it.toInt() }
             Log.d(TAG, "Processing click event: x=$x, y=$y")
-            performRemoteClick(x, y)
+            YeyaAccessibilityService.getInstance()?.performClickAtCoordinates(x, y)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing click coordinates: ${e.message}")
         }

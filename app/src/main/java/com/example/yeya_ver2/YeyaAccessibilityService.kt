@@ -221,6 +221,18 @@ class YeyaAccessibilityService : AccessibilityService() {
         }
     }
 
+    fun performClickAtCoordinates(x: Int, y: Int) {
+        val path = Path()
+        path.moveTo(x.toFloat(), y.toFloat())
+
+        val gestureBuilder = GestureDescription.Builder()
+        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 100) // 100ms duration
+        gestureBuilder.addStroke(gestureStroke)
+
+        val gesture = gestureBuilder.build()
+        dispatchGesture(gesture, null, null)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         instance = null
