@@ -101,6 +101,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
     private var isYDPRecording = false
+    private var isSocketConnected = false
+    private var isCapturing = false
+    private val ydpImageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private var isYdpCapturing = false
 
 
 
@@ -245,7 +249,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             withContext(Dispatchers.Main) {
                 startCamera()
             }
-            isYDPRecording = true
+            // startYdpImageSender is no longer needed here as it's called in startCamera
         }
     }
 
@@ -302,6 +306,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         withContext(Dispatchers.IO) {
             try {
                 clientSocket = Socket(serverAddress, serverPort)
+                isSocketConnected = true
                 val out = PrintWriter(clientSocket?.getOutputStream(), true)
                 val input = BufferedReader(InputStreamReader(clientSocket?.getInputStream()))
 
@@ -329,6 +334,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
                 }
+                startScreenRecordingAndSharing()
+                startYDPImageSender()
             } catch (e: Exception) {
                 Log.e(TAG, "Error connecting to server", e)
                 clientSocket?.close()
@@ -380,7 +387,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun launchImageProducer() {
         coroutineScope.launch(Dispatchers.Default) {
             var lastCaptureTime = System.currentTimeMillis()
-            while (isRecording) {
+            while (isCapturing) {
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastCaptureTime >= frameInterval) {
                     captureAndEnqueueFrame()
@@ -393,9 +400,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun launchImageConsumer() {
         coroutineScope.launch(Dispatchers.IO) {
-            while (isRecording) {
-                val imageData = imageQueue.receive()
-                sendImageToServer(imageData)
+            while (isCapturing) {
+                try {
+                    val imageData = imageQueue.receive()
+                    sendImageToServer(imageData)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in image consumer", e)
+                    delay(1000) // Wait before retrying
+                }
             }
         }
     }
@@ -416,10 +428,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     )
                     bitmap.copyPixelsFromBuffer(buffer)
 
-                    val compressQuality = 20 // Increase compression (lower quality)
-                    val compressedImageData = resizeAndCompressBitmap(bitmap, screenWidth, screenHeight, compressQuality)
-
-                    // Recycle the original bitmap to free up memory
+                    val compressedImageData = resizeAndCompressBitmap(bitmap, screenWidth, screenHeight, 20)
                     bitmap.recycle()
 
                     imageQueue.send(compressedImageData)
@@ -446,21 +455,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         return outputStream.toByteArray()
     }
 
-    private suspend fun sendImageToServer(imageData: ByteArray) {
+    private fun sendImageToServer(imageData: ByteArray) {
+        if (!isSocketConnected) {
+            Log.d(TAG, "Socket is not connected, skipping image send")
+            return
+        }
         try {
             clientSocket?.let { socket ->
                 if (!socket.isClosed) {
                     val outputStream = socket.getOutputStream()
                     val dataSize = imageData.size
                     outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                    Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
                     outputStream.write(imageData)
                     outputStream.flush()
+                } else {
+                    isSocketConnected = false
+                    Log.d(TAG, "Socket is closed, stopping image send")
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error sending image to server", e)
-            // Implement reconnection logic here if needed
+            isSocketConnected = false
         }
     }
 
@@ -579,6 +594,77 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun startYdpCapture() {
+        isYdpCapturing = true
+        launchYdpImageProducer()
+        launchYdpImageConsumer()
+    }
+
+    private fun launchYdpImageProducer() {
+        coroutineScope.launch(Dispatchers.Default) {
+            while (isYdpCapturing) {
+                captureAndEnqueueYdpFrame()
+                delay(33) // Approximately 30 FPS
+            }
+        }
+    }
+
+    private fun launchYdpImageConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (isYdpCapturing) {
+                try {
+                    val imageData = ydpImageQueue.receive()
+                    sendYdpImageToServer(imageData)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in YDP image consumer", e)
+                    delay(1000) // Wait before retrying
+                }
+            }
+        }
+    }
+
+    private suspend fun captureAndEnqueueYdpFrame() {
+        withContext(Dispatchers.Default) {
+            try {
+                ydpImageReader.acquireLatestImage()?.use { image ->
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.capacity())
+                    buffer.get(bytes)
+                    val compressedImageData = compressImage(bytes)
+                    ydpImageQueue.send(compressedImageData)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error capturing YDP frame", e)
+            }
+        }
+    }
+
+    private fun sendYdpImageToServer(imageData: ByteArray) {
+        if (!isSocketConnected) {
+            Log.d(TAG, "Socket is not connected, skipping YDP image send")
+            return
+        }
+        try {
+            clientSocket?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    val dataSize = imageData.size
+                    outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                    outputStream.write("YDP".toByteArray())
+                    outputStream.write(imageData)
+                    outputStream.flush()
+                    Log.d(TAG, "YDP Image Sent (Size: $dataSize bytes)")
+                } else {
+                    isSocketConnected = false
+                    Log.d(TAG, "Socket is closed, stopping YDP image send")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending YDP image to server", e)
+            isSocketConnected = false
+        }
+    }
+
     private fun startCamera() {
         if (isYDPRecording) return  // Prevent multiple initializations
 
@@ -593,15 +679,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        ydpImageReader = ImageReader.newInstance(360, 480, ImageFormat.JPEG, 2)
+        ydpImageReader = ImageReader.newInstance(360, 480, ImageFormat.YUV_420_888, 2)
         ydpImageReader.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage()
-            image?.use {
-                val buffer = it.planes[0].buffer
-                val bytes = ByteArray(buffer.capacity())
-                buffer.get(bytes)
-                sendYDPImageToServer(bytes)
-            }
+            // We'll handle image capture in captureAndEnqueueYdpFrame
         }, backgroundHandler)
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -610,6 +690,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     override fun onOpened(camera: CameraDevice) {
                         cameraDevice = camera
                         createCameraPreviewSession()
+                        startYdpCapture()  // Start YDP capture when camera is ready
                     }
                     override fun onDisconnected(camera: CameraDevice) {
                         cameraDevice?.close()
@@ -645,7 +726,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }, backgroundHandler)
     }
 
-    private val ydpImageQueue = Channel<ByteArray>(Channel.BUFFERED)
+
 
     private fun sendYDPImageToServer(imageData: ByteArray) {
         coroutineScope.launch {
@@ -655,23 +736,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun startYDPImageSender() {
         coroutineScope.launch(Dispatchers.IO) {
-            while (isActive) {
+            while (isActive && isSocketConnected) {
                 try {
                     val imageData = ydpImageQueue.receive()
                     val compressedImageData = compressImage(imageData)
-                    SocketManager.getClientSocket()?.let { socket ->
-                        if (!socket.isClosed) {
-                            val outputStream = socket.getOutputStream()
-                            val dataSize = compressedImageData.size
-                            outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                            outputStream.write("YDP".toByteArray())
-                            outputStream.write(compressedImageData)
-                            outputStream.flush()
-                            Log.d(TAG, "YDP Image Sent (Size: $dataSize bytes)")
-                        }
-                    }
+                    sendImageToServer(compressedImageData)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error sending YDP image to server", e)
+                    Log.e(TAG, "Error in YDP image sender", e)
                     delay(1000) // Wait before retrying
                 }
             }
@@ -990,6 +1061,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun stopCamera() {
         isYDPRecording = false
+        isYdpCapturing = false
         cameraDevice?.close()
         cameraDevice = null
         if (::backgroundThread.isInitialized) {
@@ -1000,16 +1072,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 Log.e(TAG, "Error stopping background thread", e)
             }
         }
-        ydpImageReader?.close()
+        if (::ydpImageReader.isInitialized) {
+            ydpImageReader.close()
+        }
     }
 
 
     private fun stopScreenSharing() {
         isRecording = false
+        isSocketConnected = false
         virtualDisplay?.release()
         imageReader?.close()
         clientSocket?.close()
         clientSocket = null
+        isCapturing = false
+        isSocketConnected = false
     }
 
 }

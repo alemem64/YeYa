@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
@@ -25,10 +26,11 @@ import android.os.Handler
 
 class YeYaCallService : Service() {
     private val TAG = "YeYaCallService"
-    private lateinit var windowManager: WindowManager
+    private var windowManager: WindowManager? = null
     private lateinit var imageView: ImageView
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private val CHANNEL_ID = "YeYaCallServiceChannel"
+
 
     companion object {
         var instance: YeYaCallService? = null
@@ -36,7 +38,9 @@ class YeYaCallService : Service() {
 
 
     override fun onCreate() {
+        super.onCreate()
         instance = this
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
         createNotificationChannel()
     }
 
@@ -108,7 +112,7 @@ class YeYaCallService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             android.graphics.PixelFormat.TRANSLUCENT
         )
-        windowManager.addView(imageView, params)
+        windowManager?.addView(imageView, params)
     }
 
     fun updateImage(byteArray: ByteArray) {
@@ -124,7 +128,9 @@ class YeYaCallService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        windowManager.removeView(imageView)
+        if (::imageView.isInitialized) {
+            windowManager?.removeView(imageView)
+        }
         coroutineScope.cancel()
         instance = null
     }
