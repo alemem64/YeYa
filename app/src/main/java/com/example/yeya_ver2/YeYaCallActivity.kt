@@ -28,6 +28,7 @@ class YeYaCallActivity : AppCompatActivity() {
     private val coroutineScope = CoroutineScope(Dispatchers.IO + Job())
     private var isReconnecting = false
     private val reconnectDelay = 5000L // 5 seconds
+    private lateinit var cameraManager: CameraManager
 
     companion object {
         var instance: YeYaCallActivity? = null
@@ -50,6 +51,8 @@ class YeYaCallActivity : AppCompatActivity() {
         screenShareImageView.setOnTouchListener(::onTouchEvent)
 
         handleIntent(intent)
+
+        cameraManager = CameraManager(this)
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
@@ -197,6 +200,19 @@ class YeYaCallActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun startCameraCapture() {
+        cameraManager.startCamera { imageData ->
+            // Send imageData to client
+            coroutineScope.launch {
+                sendImageToClient(imageData)
+            }
+        }
+    }
+
+    private fun stopCameraCapture() {
+        cameraManager.stopCamera()
     }
 
     override fun onDestroy() {

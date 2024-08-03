@@ -106,6 +106,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var lastTouchDownY: Int = 0
     private val CLICK_TIME_THRESHOLD = 200 // milliseconds
 
+    private lateinit var cameraManager: CameraManager
+
 
 
 
@@ -121,6 +123,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         initializeSpeechRecognizer()
         tts = TextToSpeech(this, this)
         startBufferProcessing()
+        cameraManager = CameraManager(this)
     }
 
     override fun onInit(status: Int) {
@@ -607,63 +610,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-//    private fun handleIncomingTouchEvents() {
-//        coroutineScope.launch(Dispatchers.IO) {
-//            try {
-//                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-//                while (isActive) {
-//                    val message = reader.readLine() ?: break
-//                    Log.d(TAG, "Received touch event: $message")
-//                    processTouchEvent(message)
-//                }
-//            } catch (e: Exception) {
-//                Log.e(TAG, "Error handling incoming touch events", e)
-//            }
-//        }
-//    }
-//
-//    private fun processTouchEvent(message: String) {
-//        val parts = message.split("|")
-//        if (parts.size != 3 || parts[0] != "TOUCH") {
-//            Log.e(TAG, "Invalid touch event message: $message")
-//            return
-//        }
-//
-//        val action = when (parts[1]) {
-//            "DOWN" -> MotionEvent.ACTION_DOWN
-//            "MOVE" -> MotionEvent.ACTION_MOVE
-//            "UP" -> MotionEvent.ACTION_UP
-//            else -> {
-//                Log.e(TAG, "Unknown touch action: ${parts[1]}")
-//                return
-//            }
-//        }
-//
-//        val (x, y) = parts[2].split(",").map { it.toInt() }
-//        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
-//
-//        // Use the same method that works for AI agent clicks
-//        performTouchAction(x, y, action)
-//    }
-//
-//    private fun performTouchAction(x: Int, y: Int, action: Int) {
-//        val path = Path()
-//        path.moveTo(x.toFloat(), y.toFloat())
-//
-//        val gestureBuilder = GestureDescription.Builder()
-//        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
-//        gestureBuilder.addStroke(gestureStroke)
-//
-//        val gesture = gestureBuilder.build()
-//        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-//            override fun onCompleted(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
-//            }
-//            override fun onCancelled(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
-//            }
-//        }, null)
-//    }
+    private fun startCameraCapture() {
+        cameraManager.startCamera { imageData ->
+            // Send imageData to server
+            coroutineScope.launch {
+                sendImageToServer(imageData)
+            }
+        }
+    }
+
+    private fun stopCameraCapture() {
+        cameraManager.stopCamera()
+    }
 
 
     private fun vibrate() {
