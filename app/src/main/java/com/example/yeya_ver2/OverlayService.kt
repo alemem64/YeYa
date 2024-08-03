@@ -29,27 +29,16 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.MotionEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import org.json.JSONArray
 import org.json.JSONObject
-
-import android.accessibilityservice.AccessibilityService
-import android.view.accessibility.AccessibilityEvent
-
-import com.example.yeya_ver2.UICapture
-
 import kotlinx.coroutines.*
-
 import android.speech.tts.TextToSpeech
-import java.util.*
 import android.Manifest
 import android.accessibilityservice.GestureDescription
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.util.DisplayMetrics
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.*
 import java.net.Socket
 import java.io.PrintWriter
 import java.io.BufferedReader
@@ -62,8 +51,13 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
-import android.os.SystemClock
-
+import android.graphics.ImageFormat
+import android.hardware.camera2.*
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Size
+import android.view.Surface
+import androidx.core.app.ActivityCompat
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -101,12 +95,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val frameInterval = 1000L / FPS
     private var isRecording = false
 
-    private var lastTouchDownTime: Long = 0
-    private var lastTouchDownX: Int = 0
-    private var lastTouchDownY: Int = 0
-    private val CLICK_TIME_THRESHOLD = 200 // milliseconds
-
-
+    private lateinit var cameraManager: CameraManager
+    private var cameraDevice: CameraDevice? = null
+    private lateinit var ydpImageReader: ImageReader
+    private lateinit var backgroundHandler: Handler
+    private lateinit var backgroundThread: HandlerThread
+    private var isYDPRecording = false
 
 
 
@@ -248,6 +242,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         Log.d(TAG, "Long press detected - 2 seconds")
         networkCoroutineScope.launch {
             connectToServer()
+            withContext(Dispatchers.Main) {
+                startCamera()
+            }
+            isYDPRecording = true
         }
     }
 
@@ -340,8 +338,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
-    private val imageLock = Any()
-    private var isProcessingImage = false
+
 
     private fun startScreenRecordingAndSharing() {
         val metrics = resources.displayMetrics
@@ -433,30 +430,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun captureAndSendFrame() {
-        imageReader?.acquireLatestImage()?.use { image ->
-            val planes = image.planes
-            val buffer = planes[0].buffer
-            val pixelStride = planes[0].pixelStride
-            val rowStride = planes[0].rowStride
-            val rowPadding = rowStride - pixelStride * screenWidth
-
-            val bitmap = Bitmap.createBitmap(
-                screenWidth + rowPadding / pixelStride, screenHeight,
-                Bitmap.Config.ARGB_8888
-            )
-            bitmap.copyPixelsFromBuffer(buffer)
-
-            val targetWidth = screenWidth / 2
-            val targetHeight = screenHeight / 2
-            val compressQuality = 50
-            val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
-
-            coroutineScope.launch {
-                sendImageToServer(compressedImageData)
-            }
-        }
-    }
 
     private fun resizeAndCompressBitmap(original: Bitmap, targetWidth: Int, targetHeight: Int, quality: Int): ByteArray {
         val scaleFactor = 0.5f // Reduce to 25% of original size
@@ -523,8 +496,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var currentPath: Path? = null
     private var gestureBuilder: GestureDescription.Builder? = null
     private var gestureStartTime: Long = 0
-    private var lastX: Float = 0f
-    private var lastY: Float = 0f
+
 
     private fun processEvent(message: String) {
         val parts = message.split("|")
@@ -607,63 +579,89 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-//    private fun handleIncomingTouchEvents() {
-//        coroutineScope.launch(Dispatchers.IO) {
-//            try {
-//                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-//                while (isActive) {
-//                    val message = reader.readLine() ?: break
-//                    Log.d(TAG, "Received touch event: $message")
-//                    processTouchEvent(message)
-//                }
-//            } catch (e: Exception) {
-//                Log.e(TAG, "Error handling incoming touch events", e)
-//            }
-//        }
-//    }
-//
-//    private fun processTouchEvent(message: String) {
-//        val parts = message.split("|")
-//        if (parts.size != 3 || parts[0] != "TOUCH") {
-//            Log.e(TAG, "Invalid touch event message: $message")
-//            return
-//        }
-//
-//        val action = when (parts[1]) {
-//            "DOWN" -> MotionEvent.ACTION_DOWN
-//            "MOVE" -> MotionEvent.ACTION_MOVE
-//            "UP" -> MotionEvent.ACTION_UP
-//            else -> {
-//                Log.e(TAG, "Unknown touch action: ${parts[1]}")
-//                return
-//            }
-//        }
-//
-//        val (x, y) = parts[2].split(",").map { it.toInt() }
-//        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
-//
-//        // Use the same method that works for AI agent clicks
-//        performTouchAction(x, y, action)
-//    }
-//
-//    private fun performTouchAction(x: Int, y: Int, action: Int) {
-//        val path = Path()
-//        path.moveTo(x.toFloat(), y.toFloat())
-//
-//        val gestureBuilder = GestureDescription.Builder()
-//        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
-//        gestureBuilder.addStroke(gestureStroke)
-//
-//        val gesture = gestureBuilder.build()
-//        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-//            override fun onCompleted(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
-//            }
-//            override fun onCancelled(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
-//            }
-//        }, null)
-//    }
+    private fun startCamera() {
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        backgroundThread = HandlerThread("CameraBackground").also { it.start() }
+        backgroundHandler = Handler(backgroundThread.looper)
+
+        val cameraId = cameraManager.cameraIdList.first {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        }
+
+        ydpImageReader = ImageReader.newInstance(360, 480, ImageFormat.JPEG, 2)
+        ydpImageReader.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage()
+            if (image != null) {
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.capacity())
+                buffer.get(bytes)
+                sendYDPImageToServer(bytes)
+                image.close()
+            }
+        }, backgroundHandler)
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    cameraDevice = camera
+                    createCameraPreviewSession()
+                }
+                override fun onDisconnected(camera: CameraDevice) {
+                    cameraDevice?.close()
+                }
+                override fun onError(camera: CameraDevice, error: Int) {
+                    cameraDevice?.close()
+                    cameraDevice = null
+                }
+            }, backgroundHandler)
+        }
+    }
+
+    private fun createCameraPreviewSession() {
+        val surface = ydpImageReader.surface
+        val previewRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        previewRequestBuilder?.addTarget(surface)
+
+        cameraDevice?.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                previewRequestBuilder?.build()?.let { request ->
+                    session.setRepeatingRequest(request, null, backgroundHandler)
+                }
+            }
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Failed to configure camera preview session")
+            }
+        }, backgroundHandler)
+    }
+
+    private fun sendYDPImageToServer(imageData: ByteArray) {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val compressedImageData = compressImage(imageData)
+                SocketManager.getClientSocket()?.let { socket ->
+                    if (!socket.isClosed) {
+                        val outputStream = socket.getOutputStream()
+                        val dataSize = compressedImageData.size
+                        outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                        outputStream.write("YDP".toByteArray()) // Add YDP identifier
+                        outputStream.write(compressedImageData)
+                        outputStream.flush()
+                        Log.d(TAG, "YDP Image Sent (Size: $dataSize bytes)")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending YDP image to server", e)
+            }
+        }
+    }
+
+    private fun compressImage(imageData: ByteArray): ByteArray {
+        val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+        val outputStream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, outputStream)
+        return outputStream.toByteArray()
+    }
+
 
 
     private fun vibrate() {
@@ -969,6 +967,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun stopScreenSharing() {
+        isYDPRecording = false
+        cameraDevice?.close()
+        backgroundThread.quitSafely()
+        try {
+            backgroundThread.join()
+        } catch (e: InterruptedException) {
+            e.printStackTrace()
+        }
         virtualDisplay?.release()
         imageReader?.close()
         clientSocket?.close()
