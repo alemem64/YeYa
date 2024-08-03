@@ -107,6 +107,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private val CLICK_TIME_THRESHOLD = 200 // milliseconds
 
     private lateinit var videoCallOverlayView: View
+    private lateinit var fullscreenOverlayView: View
     private var isVideoCallFullscreen = false
     private var originalX = 0
     private var originalY = 0
@@ -365,9 +366,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         videoCallOverlayView = inflater.inflate(R.layout.video_call_overlay, null)
 
         val params = WindowManager.LayoutParams(
-            360, 480,
+            480, 960,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
 
@@ -378,6 +379,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         windowManager.addView(videoCallOverlayView, params)
 
         setupVideoCallOverlayTouchListener(params)
+        setupFullscreenOverlay()
+    }
+
+    private fun setupFullscreenOverlay() {
+        fullscreenOverlayView = LayoutInflater.from(this).inflate(R.layout.fullscreen_overlay, null)
+        fullscreenOverlayView.setOnClickListener {
+            toggleFullscreen()
+        }
     }
 
     private fun setupVideoCallOverlayTouchListener(params: WindowManager.LayoutParams) {
@@ -387,6 +396,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         var initialTouchY = 0f
         var startClickTime = 0L
         var totalMoveDistance = 0f
+
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
 
         videoCallOverlayView.setOnTouchListener { _, event ->
             when (event.action) {
@@ -402,18 +415,29 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
-                    params.x = initialX + dx
-                    params.y = initialY + dy
-                    windowManager.updateViewLayout(videoCallOverlayView, params)
 
-                    totalMoveDistance += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                    // Calculate new position
+                    var newX = initialX + dx
+                    var newY = initialY + dy
+
+                    // Apply boundary checks
+                    newX = newX.coerceIn(0, screenWidth - params.width)
+                    newY = newY.coerceIn(0, screenHeight - params.height)
+
+                    // Update position only if it's within boundaries
+                    if (newX != params.x || newY != params.y) {
+                        params.x = newX
+                        params.y = newY
+                        windowManager.updateViewLayout(videoCallOverlayView, params)
+
+                        totalMoveDistance += Math.sqrt(((newX - initialX) * (newX - initialX) + (newY - initialY) * (newY - initialY)).toDouble()).toFloat()
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     val clickDuration = System.currentTimeMillis() - startClickTime
                     if (clickDuration < 200 && totalMoveDistance < 20) {
-                        // Consider it a tap if the duration is less than 200ms and total move distance is small
-                        toggleFullscreen(params)
+                        toggleFullscreen()
                     }
                     true
                 }
@@ -422,22 +446,25 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun toggleFullscreen(params: WindowManager.LayoutParams) {
+    private fun toggleFullscreen() {
         if (isVideoCallFullscreen) {
-            params.width = 360
-            params.height = 480
-            params.x = originalX
-            params.y = originalY
+            windowManager.removeView(fullscreenOverlayView)
+            windowManager.addView(videoCallOverlayView, videoCallOverlayView.layoutParams)
         } else {
-            originalX = params.x
-            originalY = params.y
-            params.width = WindowManager.LayoutParams.MATCH_PARENT
-            params.height = WindowManager.LayoutParams.MATCH_PARENT
-            params.x = 0
-            params.y = 0
+            originalX = (videoCallOverlayView.layoutParams as WindowManager.LayoutParams).x
+            originalY = (videoCallOverlayView.layoutParams as WindowManager.LayoutParams).y
+            windowManager.removeView(videoCallOverlayView)
+
+            val fullscreenParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+            windowManager.addView(fullscreenOverlayView, fullscreenParams)
         }
         isVideoCallFullscreen = !isVideoCallFullscreen
-        windowManager.updateViewLayout(videoCallOverlayView, params)
     }
 
     private fun startClientSendSpeakCall() {

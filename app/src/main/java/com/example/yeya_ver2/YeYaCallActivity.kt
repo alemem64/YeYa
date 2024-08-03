@@ -1,6 +1,5 @@
 package com.example.yeya_ver2
 
-import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Path
@@ -8,11 +7,8 @@ import android.graphics.RectF
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
-import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.ImageView
 import kotlinx.coroutines.CoroutineScope
@@ -160,99 +156,13 @@ class YeYaCallActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        when (intent?.action) {
-            "UPDATE_SCREEN_SHARE" -> {
-                val imageData = intent.getByteArrayExtra("imageData")
-                if (imageData != null) {
-                    updateScreenShare(imageData)
-                }
-            }
-            "SETUP_VIDEO_CALL_OVERLAY" -> {
-                setupVideoCallOverlay()
-            }
-            else -> {
-                // Handle any other intents or default behavior
+        if (intent?.action == "UPDATE_SCREEN_SHARE") {
+            val imageData = intent.getByteArrayExtra("imageData")
+            if (imageData != null) {
+                updateScreenShare(imageData)
             }
         }
     }
-
-    private fun setupVideoCallOverlay() {
-        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        videoCallOverlayView = inflater.inflate(R.layout.video_call_overlay, null)
-
-        val params = FrameLayout.LayoutParams(
-            360, 480
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            leftMargin = 100
-            topMargin = 100
-        }
-
-        val rootLayout = findViewById<FrameLayout>(R.id.root_layout)
-        rootLayout.addView(videoCallOverlayView, params)
-
-        setupVideoCallOverlayTouchListener(params)
-    }
-
-    private fun setupVideoCallOverlayTouchListener(params: FrameLayout.LayoutParams) {
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-        var startClickTime = 0L
-        var totalMoveDistance = 0f
-
-        videoCallOverlayView.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.leftMargin
-                    initialY = params.topMargin
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    startClickTime = System.currentTimeMillis()
-                    totalMoveDistance = 0f
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - initialTouchX).toInt()
-                    val dy = (event.rawY - initialTouchY).toInt()
-                    params.leftMargin = initialX + dx
-                    params.topMargin = initialY + dy
-                    videoCallOverlayView.layoutParams = params
-
-                    totalMoveDistance += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    val clickDuration = System.currentTimeMillis() - startClickTime
-                    if (clickDuration < 200 && totalMoveDistance < 20) {
-                        toggleFullscreen(params)
-                    }
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
-    private fun toggleFullscreen(params: FrameLayout.LayoutParams) {
-        if (isVideoCallFullscreen) {
-            params.width = 360
-            params.height = 480
-            params.leftMargin = originalX
-            params.topMargin = originalY
-        } else {
-            originalX = params.leftMargin
-            originalY = params.topMargin
-            params.width = FrameLayout.LayoutParams.MATCH_PARENT
-            params.height = FrameLayout.LayoutParams.MATCH_PARENT
-            params.leftMargin = 0
-            params.topMargin = 0
-        }
-        isVideoCallFullscreen = !isVideoCallFullscreen
-        videoCallOverlayView.layoutParams = params
-    }
-
 
     private fun updateScreenShare(imageData: ByteArray) {
         val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
