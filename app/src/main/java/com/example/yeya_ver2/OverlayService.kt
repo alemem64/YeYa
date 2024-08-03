@@ -106,6 +106,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var lastTouchDownY: Int = 0
     private val CLICK_TIME_THRESHOLD = 200 // milliseconds
 
+    private lateinit var videoCallOverlayView: View
+    private var isVideoCallFullscreen = false
+    private var originalX = 0
+    private var originalY = 0
+
 
 
 
@@ -327,6 +332,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                     // Handle incoming click events
                     handleIncomingEvents()
+
+                    // Start Video call
+                    startClientSendVideoCall()
+                    startClientSendSpeakCall()
+                    startClientReceiveVideoCall()
+                    startClientReceiveSpeakCall()
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -338,6 +349,98 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun startClientSendVideoCall() {
+        Log.d(TAG, "Starting client send video call")
+        setupVideoCallOverlay()
+    }
+
+    private fun setupVideoCallOverlay() {
+        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        videoCallOverlayView = inflater.inflate(R.layout.video_call_overlay, null)
+
+        val params = WindowManager.LayoutParams(
+            360, 480,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = 100
+        params.y = 100
+
+        windowManager.addView(videoCallOverlayView, params)
+
+        setupVideoCallOverlayTouchListener(params)
+    }
+
+    private fun setupVideoCallOverlayTouchListener(params: WindowManager.LayoutParams) {
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var startClickTime = 0L
+
+        videoCallOverlayView.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    startClickTime = System.currentTimeMillis()
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val clickDuration = System.currentTimeMillis() - startClickTime
+                    if (clickDuration < 200) {  // Short click
+                        toggleFullscreen(params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val moveDuration = System.currentTimeMillis() - startClickTime
+                    if (moveDuration > 200) {  // Long press and move
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(videoCallOverlayView, params)
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun toggleFullscreen(params: WindowManager.LayoutParams) {
+        if (isVideoCallFullscreen) {
+            params.width = 360
+            params.height = 480
+            params.x = originalX
+            params.y = originalY
+        } else {
+            originalX = params.x
+            originalY = params.y
+            params.width = WindowManager.LayoutParams.MATCH_PARENT
+            params.height = WindowManager.LayoutParams.MATCH_PARENT
+            params.x = 0
+            params.y = 0
+        }
+        isVideoCallFullscreen = !isVideoCallFullscreen
+        windowManager.updateViewLayout(videoCallOverlayView, params)
+    }
+
+    private fun startClientSendSpeakCall() {
+        Log.d(TAG, "Starting client send speak call")
+    }
+
+    private fun startClientReceiveVideoCall() {
+        Log.d(TAG, "Starting client receive video call")
+    }
+
+    private fun startClientReceiveSpeakCall() {
+        Log.d(TAG, "Starting client receive speak call")
+    }
 
 
     private val imageLock = Any()

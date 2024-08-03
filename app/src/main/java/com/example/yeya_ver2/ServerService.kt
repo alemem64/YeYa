@@ -136,12 +136,33 @@ class ServerService : Service() {
                         startYeYaCallService(client)  // Pass the client socket here
                         stopOverlayService()
                         receiveScreenSharing(client)
+
+                        startServerSendVideoCall()
+                        startServerSendSpeakCall()
+                        startServerReceiveVideoCall()
+                        startServerReceiveSpeakCall()
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling client", e)
             }
         }
+    }
+
+    private fun startServerSendVideoCall() {
+        Log.d(TAG, "Starting server send video call")
+    }
+
+    private fun startServerSendSpeakCall() {
+        Log.d(TAG, "Starting server send speak call")
+    }
+
+    private fun startServerReceiveVideoCall() {
+        Log.d(TAG, "Starting server receive video call")
+    }
+
+    private fun startServerReceiveSpeakCall() {
+        Log.d(TAG, "Starting server receive speak call")
     }
 
     private fun startYeYaCallService(client: Socket) {
