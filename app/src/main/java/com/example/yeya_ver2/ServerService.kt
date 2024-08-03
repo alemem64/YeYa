@@ -165,7 +165,7 @@ class ServerService : Service() {
             val identifierBuffer = ByteArray(3)
 
             try {
-                while (!client.isClosed) {
+                while (isActive && !client.isClosed) {
                     // Read image size
                     if (inputStream.read(sizeBuffer) == -1) break
                     val imageSize = ByteBuffer.wrap(sizeBuffer).int
@@ -204,7 +204,11 @@ class ServerService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error in receiveScreenSharing", e)
             } finally {
-                client.close()
+                try {
+                    client.close()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error closing client socket", e)
+                }
             }
         }
     }

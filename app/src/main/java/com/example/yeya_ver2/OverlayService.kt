@@ -580,41 +580,52 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startCamera() {
+        if (isYDPRecording) return  // Prevent multiple initializations
+
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         backgroundThread = HandlerThread("CameraBackground").also { it.start() }
         backgroundHandler = Handler(backgroundThread.looper)
 
-        val cameraId = cameraManager.cameraIdList.first {
+        val cameraId = cameraManager.cameraIdList.firstOrNull {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        } ?: run {
+            Log.e(TAG, "No front-facing camera found")
+            return
         }
 
         ydpImageReader = ImageReader.newInstance(360, 480, ImageFormat.JPEG, 2)
         ydpImageReader.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
-            if (image != null) {
-                val buffer = image.planes[0].buffer
+            image?.use {
+                val buffer = it.planes[0].buffer
                 val bytes = ByteArray(buffer.capacity())
                 buffer.get(bytes)
                 sendYDPImageToServer(bytes)
-                image.close()
             }
         }, backgroundHandler)
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) {
-                    cameraDevice = camera
-                    createCameraPreviewSession()
-                }
-                override fun onDisconnected(camera: CameraDevice) {
-                    cameraDevice?.close()
-                }
-                override fun onError(camera: CameraDevice, error: Int) {
-                    cameraDevice?.close()
-                    cameraDevice = null
-                }
-            }, backgroundHandler)
+            try {
+                cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                    override fun onOpened(camera: CameraDevice) {
+                        cameraDevice = camera
+                        createCameraPreviewSession()
+                    }
+                    override fun onDisconnected(camera: CameraDevice) {
+                        cameraDevice?.close()
+                    }
+                    override fun onError(camera: CameraDevice, error: Int) {
+                        Log.e(TAG, "Camera open error: $error")
+                        cameraDevice?.close()
+                        cameraDevice = null
+                    }
+                }, backgroundHandler)
+            } catch (e: CameraAccessException) {
+                Log.e(TAG, "Failed to open camera", e)
+            }
         }
+
+        isYDPRecording = true
     }
 
     private fun createCameraPreviewSession() {
@@ -634,23 +645,35 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }, backgroundHandler)
     }
 
+    private val ydpImageQueue = Channel<ByteArray>(Channel.BUFFERED)
+
     private fun sendYDPImageToServer(imageData: ByteArray) {
+        coroutineScope.launch {
+            ydpImageQueue.send(imageData)
+        }
+    }
+
+    private fun startYDPImageSender() {
         coroutineScope.launch(Dispatchers.IO) {
-            try {
-                val compressedImageData = compressImage(imageData)
-                SocketManager.getClientSocket()?.let { socket ->
-                    if (!socket.isClosed) {
-                        val outputStream = socket.getOutputStream()
-                        val dataSize = compressedImageData.size
-                        outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                        outputStream.write("YDP".toByteArray()) // Add YDP identifier
-                        outputStream.write(compressedImageData)
-                        outputStream.flush()
-                        Log.d(TAG, "YDP Image Sent (Size: $dataSize bytes)")
+            while (isActive) {
+                try {
+                    val imageData = ydpImageQueue.receive()
+                    val compressedImageData = compressImage(imageData)
+                    SocketManager.getClientSocket()?.let { socket ->
+                        if (!socket.isClosed) {
+                            val outputStream = socket.getOutputStream()
+                            val dataSize = compressedImageData.size
+                            outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                            outputStream.write("YDP".toByteArray())
+                            outputStream.write(compressedImageData)
+                            outputStream.flush()
+                            Log.d(TAG, "YDP Image Sent (Size: $dataSize bytes)")
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending YDP image to server", e)
+                    delay(1000) // Wait before retrying
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending YDP image to server", e)
             }
         }
     }
@@ -958,23 +981,31 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         virtualDisplay?.release()
         speechRecognizer.destroy()
         coroutineScope.cancel()
-        networkCoroutineScope.cancel() // Add this line
+        networkCoroutineScope.cancel()
         tts.stop()
         tts.shutdown()
-        clientSocket?.close()
-        coroutineScope.cancel()
         stopScreenSharing()
+        stopCamera()
     }
 
-    private fun stopScreenSharing() {
+    private fun stopCamera() {
         isYDPRecording = false
         cameraDevice?.close()
-        backgroundThread.quitSafely()
-        try {
-            backgroundThread.join()
-        } catch (e: InterruptedException) {
-            e.printStackTrace()
+        cameraDevice = null
+        if (::backgroundThread.isInitialized) {
+            backgroundThread.quitSafely()
+            try {
+                backgroundThread.join()
+            } catch (e: InterruptedException) {
+                Log.e(TAG, "Error stopping background thread", e)
+            }
         }
+        ydpImageReader?.close()
+    }
+
+
+    private fun stopScreenSharing() {
+        isRecording = false
         virtualDisplay?.release()
         imageReader?.close()
         clientSocket?.close()
