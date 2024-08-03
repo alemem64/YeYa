@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity() {
     private val NOTIFICATION_PERMISSION_REQUEST_CODE = 3
     private val WIFI_PERMISSION_REQUEST_CODE = 4
     private val MULTICAST_PERMISSION_REQUEST_CODE = 5
+    private val CAMERA_PERMISSION_REQUEST_CODE = 6
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +39,8 @@ class MainActivity : AppCompatActivity() {
             requestAccessibilityService()
         } else if (!Settings.canDrawOverlays(this)) {
             requestOverlayPermission()
+        } else if (!isCameraPermissionGranted()) {
+                requestCameraPermission()
         } else if (!isRecordAudioPermissionGranted()) {
             requestRecordAudioPermission()
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isNotificationPermissionGranted()) {
@@ -49,6 +52,21 @@ class MainActivity : AppCompatActivity() {
         } else {
             startScreenCaptureIntent()
         }
+    }
+
+    private fun isCameraPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestCameraPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.CAMERA),
+            CAMERA_PERMISSION_REQUEST_CODE
+        )
     }
 
     private fun isRecordAudioPermissionGranted(): Boolean {
@@ -145,7 +163,8 @@ class MainActivity : AppCompatActivity() {
             RECORD_AUDIO_PERMISSION_REQUEST_CODE,
             WIFI_PERMISSION_REQUEST_CODE,
             MULTICAST_PERMISSION_REQUEST_CODE,
-            NOTIFICATION_PERMISSION_REQUEST_CODE -> {
+            NOTIFICATION_PERMISSION_REQUEST_CODE,
+            CAMERA_PERMISSION_REQUEST_CODE -> {
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     checkAndRequestPermissions()
                 } else {
