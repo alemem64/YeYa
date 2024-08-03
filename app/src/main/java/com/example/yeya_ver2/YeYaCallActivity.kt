@@ -20,8 +20,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
+import java.io.IOException
+import java.io.InputStream
 import java.net.Socket
 import java.nio.ByteBuffer
+import kotlinx.coroutines.channels.Channel
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -75,8 +78,10 @@ class YeYaCallActivity : AppCompatActivity() {
             endCall()
         }
 
-        startVideoCall()
+        YVC_startCall()
     }
+
+
 
     private fun startVideoCall() {
         startCameraCapture()
@@ -239,15 +244,58 @@ class YeYaCallActivity : AppCompatActivity() {
         }
     }
 
+    data class Frame(val type: Int, val data: ByteArray)
+
+    private fun buildFrame(type: Int, data: ByteArray): ByteArray {
+        val buffer = ByteBuffer.allocate(13 + data.size)
+        buffer.putInt(0xFFFFFFFF.toInt()) // Start marker
+        buffer.put(type.toByte())
+        buffer.putInt(data.size)
+        buffer.put(data)
+        buffer.putInt(0xEEEEEEEE.toInt()) // End marker
+        return buffer.array()
+    }
+
+    private fun readFrame(inputStream: InputStream, buffer: ByteArray): Frame {
+        // Read start marker
+        var bytesRead = inputStream.read(buffer, 0, 4)
+        if (bytesRead != 4 || ByteBuffer.wrap(buffer, 0, 4).int != 0xFFFFFFFF.toInt()) {
+            throw IOException("Invalid start marker")
+        }
+
+        // Read type
+        bytesRead = inputStream.read(buffer, 0, 1)
+        val type = buffer[0].toInt()
+
+        // Read data length
+        bytesRead = inputStream.read(buffer, 0, 4)
+        val length = ByteBuffer.wrap(buffer, 0, 4).int
+
+        // Read data
+        val data = ByteArray(length)
+        var totalBytesRead = 0
+        while (totalBytesRead < length) {
+            bytesRead = inputStream.read(data, totalBytesRead, length - totalBytesRead)
+            if (bytesRead == -1) break
+            totalBytesRead += bytesRead
+        }
+
+        // Read end marker
+        bytesRead = inputStream.read(buffer, 0, 4)
+        if (bytesRead != 4 || ByteBuffer.wrap(buffer, 0, 4).int != 0xEEEEEEEE.toInt()) {
+            throw IOException("Invalid end marker")
+        }
+
+        return Frame(type, data)
+    }
+
     private suspend fun sendVideoFrame(imageData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                SocketManager.getOutputStream()?.let { outputStream ->
-                    outputStream.write("VIDEO".toByteArray())
-                    outputStream.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
-                    outputStream.write(imageData)
-                    outputStream.flush()
-                }
+                val outputStream = SocketManager.getOutputStream() ?: return@withContext
+                val frameData = buildFrame(1, imageData) // 1 for video type
+                outputStream.write(frameData)
+                outputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending video frame", e)
             }
@@ -287,18 +335,15 @@ class YeYaCallActivity : AppCompatActivity() {
     private suspend fun sendAudioData(audioData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                SocketManager.getOutputStream()?.let { outputStream ->
-                    outputStream.write("AUDIO".toByteArray())
-                    outputStream.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
-                    outputStream.write(audioData)
-                    outputStream.flush()
-                }
+                val outputStream = SocketManager.getOutputStream() ?: return@withContext
+                val frameData = buildFrame(2, audioData) // 2 for audio type
+                outputStream.write(frameData)
+                outputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending audio data", e)
             }
         }
     }
-
     private suspend fun sendAudioToClient(audioData: ByteArray) {
         // Implement the logic to send audio data to the client
         // You can use the existing socket connection or create a new one for audio
@@ -307,19 +352,13 @@ class YeYaCallActivity : AppCompatActivity() {
     private fun receiveVideoAndAudio() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val inputStream = SocketManager.getClientSocket()?.getInputStream()
-                val buffer = ByteArray(1024)
-                while (true) {
-                    val type = String(buffer, 0, inputStream?.read(buffer, 0, 5) ?: 0)
-                    val sizeBuffer = ByteArray(4)
-                    inputStream?.read(sizeBuffer)
-                    val size = ByteBuffer.wrap(sizeBuffer).int
-                    val data = ByteArray(size)
-                    inputStream?.read(data)
-
-                    when (type) {
-                        "VIDEO" -> updateVideoDisplay(data)
-                        "AUDIO" -> playAudioData(data)
+                val inputStream = SocketManager.getClientSocket()?.getInputStream() ?: return@launch
+                val buffer = ByteArray(4096) // Adjust buffer size as needed
+                while (isActive) {
+                    val frame = readFrame(inputStream, buffer)
+                    when (frame.type) {
+                        1 -> updateVideoDisplay(frame.data)
+                        2 -> playAudioData(frame.data)
                     }
                 }
             } catch (e: Exception) {
@@ -362,6 +401,131 @@ class YeYaCallActivity : AppCompatActivity() {
             val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
             localVideoView.setImageBitmap(bitmap)
         }
+    }
+
+    private val YVC_videoQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val YVC_audioQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val YVC_FPS = 15
+    private val YVC_frameInterval = 1000L / YVC_FPS
+    private var YVC_isActive = false
+
+
+    private fun YVC_startCall() {
+        YVC_isActive = true
+        YVC_launchVideoCaptureProducer()
+        YVC_launchAudioCaptureProducer()
+        YVC_launchVideoConsumer()
+        YVC_launchAudioConsumer()
+        YVC_receiveVideoAndAudio()
+    }
+
+    private fun YVC_launchVideoCaptureProducer() {
+        coroutineScope.launch(Dispatchers.Default) {
+            var lastCaptureTime = System.currentTimeMillis()
+            while (YVC_isActive) {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastCaptureTime >= YVC_frameInterval) {
+                    YVC_captureAndEnqueueVideoFrame()
+                    lastCaptureTime = currentTime
+                }
+                delay(1)
+            }
+        }
+    }
+
+    private fun YVC_launchAudioCaptureProducer() {
+        coroutineScope.launch(Dispatchers.Default) {
+            audioManager.startAudioCapture { audioData ->
+                YVC_audioQueue.send(audioData)
+            }
+        }
+    }
+
+    private fun YVC_launchVideoConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (YVC_isActive) {
+                val videoData = YVC_videoQueue.receive()
+                YVC_sendVideoToClient(videoData)
+            }
+        }
+    }
+
+    private fun YVC_launchAudioConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (YVC_isActive) {
+                val audioData = YVC_audioQueue.receive()
+                YVC_sendAudioToClient(audioData)
+            }
+        }
+    }
+
+    private suspend fun YVC_captureAndEnqueueVideoFrame() {
+        cameraManager.captureImage { imageData ->
+            coroutineScope.launch {
+                YVC_videoQueue.send(imageData)
+            }
+        }
+    }
+
+    private suspend fun YVC_sendVideoToClient(videoData: ByteArray) {
+        try {
+            SocketManager.getOutputStream()?.let { outputStream ->
+                outputStream.write("VIDEO".toByteArray())
+                outputStream.write(ByteBuffer.allocate(4).putInt(videoData.size).array())
+                outputStream.write(videoData)
+                outputStream.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending video to client", e)
+        }
+    }
+
+    private suspend fun YVC_sendAudioToClient(audioData: ByteArray) {
+        try {
+            SocketManager.getOutputStream()?.let { outputStream ->
+                outputStream.write("AUDIO".toByteArray())
+                outputStream.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
+                outputStream.write(audioData)
+                outputStream.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending audio to client", e)
+        }
+    }
+
+    private fun YVC_receiveVideoAndAudio() {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = SocketManager.getClientSocket()?.getInputStream()
+                val buffer = ByteArray(1024)
+                while (YVC_isActive) {
+                    val type = String(buffer, 0, inputStream?.read(buffer, 0, 5) ?: 0)
+                    val sizeBuffer = ByteArray(4)
+                    inputStream?.read(sizeBuffer)
+                    val size = ByteBuffer.wrap(sizeBuffer).int
+                    val data = ByteArray(size)
+                    inputStream?.read(data)
+
+                    when (type) {
+                        "VIDEO" -> YVC_updateVideoDisplay(data)
+                        "AUDIO" -> YVC_playAudioData(data)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error receiving video/audio data", e)
+            }
+        }
+    }
+
+    private suspend fun YVC_updateVideoDisplay(imageData: ByteArray) {
+        withContext(Dispatchers.Main) {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+            remoteVideoView.setImageBitmap(bitmap)
+        }
+    }
+
+    private suspend fun YVC_playAudioData(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
     }
 
     override fun onDestroy() {

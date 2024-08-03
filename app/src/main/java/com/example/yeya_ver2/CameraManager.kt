@@ -109,4 +109,15 @@ class CameraManager(private val context: Context) {
         yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 80, out)
         return out.toByteArray()
     }
+
+    fun captureImage(onImageCaptured: (ByteArray) -> Unit) {
+        imageReader.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage()
+            val buffer = image.planes[0].buffer
+            val imageData = ByteArray(buffer.remaining())
+            buffer.get(imageData)
+            onImageCaptured(imageData)
+            image.close()
+        }, null)
+    }
 }

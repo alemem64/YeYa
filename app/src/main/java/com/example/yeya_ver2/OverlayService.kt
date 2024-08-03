@@ -66,6 +66,9 @@ import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
 import android.os.SystemClock
 import android.widget.ImageView
+import java.io.IOException
+import java.io.InputStream
+
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -415,7 +418,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     startScreenRecordingAndSharing()
 
                     // Start video call components
-                    startVideoCallComponents()
+                    YVC_startComponents()
 
                     // Handle incoming events
                     handleIncomingEvents()
@@ -734,14 +737,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun sendVideoFrame(imageData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                val outputStream = clientSocket?.getOutputStream()
-                outputStream?.write("VIDEO".toByteArray())
-                outputStream?.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
-                outputStream?.write(imageData)
-                outputStream?.flush()
+                val outputStream = clientSocket?.getOutputStream() ?: return@withContext
+                val frameData = buildFrame(1, imageData) // 1 for video type
+                outputStream.write(frameData)
+                outputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending video frame", e)
-                reconnectToServer()
             }
         }
     }
@@ -761,24 +762,181 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun sendAudioData(audioData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                val outputStream = clientSocket?.getOutputStream()
-                outputStream?.write("AUDIO".toByteArray())
-                outputStream?.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
-                outputStream?.write(audioData)
-                outputStream?.flush()
+                val outputStream = clientSocket?.getOutputStream() ?: return@withContext
+                val frameData = buildFrame(2, audioData) // 2 for audio type
+                outputStream.write(frameData)
+                outputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending audio data", e)
-                reconnectToServer()
             }
         }
+    }
+
+    private fun buildFrame(type: Int, data: ByteArray): ByteArray {
+        val buffer = ByteBuffer.allocate(13 + data.size)
+        buffer.putInt(0xFFFFFFFF.toInt()) // Start marker
+        buffer.put(type.toByte())
+        buffer.putInt(data.size)
+        buffer.put(data)
+        buffer.putInt(0xEEEEEEEE.toInt()) // End marker
+        return buffer.array()
     }
 
     private fun receiveVideoAndAudio() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val inputStream = SocketManager.getClientSocket()?.getInputStream()
+                val inputStream = clientSocket?.getInputStream() ?: return@launch
+                val buffer = ByteArray(4096) // Adjust buffer size as needed
+                while (isActive) {
+                    val frame = readFrame(inputStream, buffer)
+                    when (frame.type) {
+                        1 -> updateVideoDisplay(frame.data)
+                        2 -> playAudioData(frame.data)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error receiving video/audio data", e)
+            }
+        }
+    }
+
+    private fun readFrame(inputStream: InputStream, buffer: ByteArray): Frame {
+        // Read start marker
+        var bytesRead = inputStream.read(buffer, 0, 4)
+        if (bytesRead != 4 || ByteBuffer.wrap(buffer, 0, 4).int != 0xFFFFFFFF.toInt()) {
+            throw IOException("Invalid start marker")
+        }
+
+        // Read type
+        bytesRead = inputStream.read(buffer, 0, 1)
+        val type = buffer[0].toInt()
+
+        // Read data length
+        bytesRead = inputStream.read(buffer, 0, 4)
+        val length = ByteBuffer.wrap(buffer, 0, 4).int
+
+        // Read data
+        val data = ByteArray(length)
+        var totalBytesRead = 0
+        while (totalBytesRead < length) {
+            bytesRead = inputStream.read(data, totalBytesRead, length - totalBytesRead)
+            if (bytesRead == -1) break
+            totalBytesRead += bytesRead
+        }
+
+        // Read end marker
+        bytesRead = inputStream.read(buffer, 0, 4)
+        if (bytesRead != 4 || ByteBuffer.wrap(buffer, 0, 4).int != 0xEEEEEEEE.toInt()) {
+            throw IOException("Invalid end marker")
+        }
+
+        return Frame(type, data)
+    }
+
+
+
+    data class Frame(val type: Int, val data: ByteArray)
+
+    private val YVC_videoQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val YVC_audioQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val YVC_FPS = 15
+    private val YVC_frameInterval = 1000L / YVC_FPS
+    private var YVC_isActive = false
+
+    private fun YVC_startComponents() {
+        YVC_isActive = true
+        YVC_launchVideoCaptureProducer()
+        YVC_launchAudioCaptureProducer()
+        YVC_launchVideoConsumer()
+        YVC_launchAudioConsumer()
+        YVC_receiveVideoAndAudio()
+    }
+
+    private fun YVC_launchVideoCaptureProducer() {
+        coroutineScope.launch(Dispatchers.Default) {
+            var lastCaptureTime = System.currentTimeMillis()
+            while (YVC_isActive) {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastCaptureTime >= YVC_frameInterval) {
+                    YVC_captureAndEnqueueVideoFrame()
+                    lastCaptureTime = currentTime
+                }
+                delay(1)
+            }
+        }
+    }
+
+    private fun YVC_launchAudioCaptureProducer() {
+        coroutineScope.launch(Dispatchers.Default) {
+            audioManager.startAudioCapture { audioData ->
+                YVC_audioQueue.send(audioData)
+            }
+        }
+    }
+
+    private fun YVC_launchVideoConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (YVC_isActive) {
+                val videoData = YVC_videoQueue.receive()
+                YVC_sendVideoToServer(videoData)
+            }
+        }
+    }
+
+    private fun YVC_launchAudioConsumer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (YVC_isActive) {
+                val audioData = YVC_audioQueue.receive()
+                YVC_sendAudioToServer(audioData)
+            }
+        }
+    }
+
+    private suspend fun YVC_captureAndEnqueueVideoFrame() {
+        cameraManager.captureImage { imageData ->
+            coroutineScope.launch {
+                YVC_videoQueue.send(imageData)
+            }
+        }
+    }
+    private suspend fun YVC_sendVideoToServer(videoData: ByteArray) {
+        try {
+            clientSocket?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    outputStream.write("VIDEO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(videoData.size).array())
+                    outputStream.write(videoData)
+                    outputStream.flush()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending video to server", e)
+        }
+    }
+
+    private suspend fun YVC_sendAudioToServer(audioData: ByteArray) {
+        try {
+            clientSocket?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    outputStream.write("AUDIO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
+                    outputStream.write(audioData)
+                    outputStream.flush()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending audio to server", e)
+        }
+    }
+
+    private fun YVC_receiveVideoAndAudio() {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = clientSocket?.getInputStream()
                 val buffer = ByteArray(1024)
-                while (true) {
+                while (YVC_isActive) {
                     val type = String(buffer, 0, inputStream?.read(buffer, 0, 5) ?: 0)
                     val sizeBuffer = ByteArray(4)
                     inputStream?.read(sizeBuffer)
@@ -787,8 +945,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     inputStream?.read(data)
 
                     when (type) {
-                        "VIDEO" -> updateVideoDisplay(data)
-                        "AUDIO" -> playAudioData(data)
+                        "VIDEO" -> YVC_updateVideoDisplay(data)
+                        "AUDIO" -> YVC_playAudioData(data)
                     }
                 }
             } catch (e: Exception) {
@@ -796,6 +954,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
         }
     }
+
+    private suspend fun YVC_updateVideoDisplay(imageData: ByteArray) {
+        withContext(Dispatchers.Main) {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+            remoteVideoView.setImageBitmap(bitmap)
+        }
+    }
+
+    private suspend fun YVC_playAudioData(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
+    }
+
 
     private suspend fun updateVideoDisplay(imageData: ByteArray) {
         withContext(Dispatchers.Main) {
