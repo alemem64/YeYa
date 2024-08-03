@@ -90,10 +90,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var screenWidth: Int = 0
     private var screenHeight: Int = 0
 
-    private val imageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val screenShareImageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private var isScreenSharing = false
     private val FPS = 30// Adjust this value for desired frame rate
     private val frameInterval = 1000L / FPS
-    private var isRecording = false
 
     private lateinit var cameraManager: CameraManager
     private var cameraDevice: CameraDevice? = null
@@ -103,6 +103,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var isYDPRecording = false
     private var isSocketConnected = false
     private var isCapturing = false
+
     private val ydpImageQueue = Channel<ByteArray>(Channel.BUFFERED)
     private var isYdpCapturing = false
 
@@ -379,12 +380,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             imageReader?.surface, null, null
         )
 
-        isRecording = true
-        launchImageProducer()
-        launchImageConsumer()
+        isScreenSharing = true
+        launchScreenShareImageProducer()
+        launchScreenShareImageConsumer()
     }
 
-    private fun launchImageProducer() {
+    private fun launchScreenShareImageProducer() {
         coroutineScope.launch(Dispatchers.Default) {
             var lastCaptureTime = System.currentTimeMillis()
             while (isCapturing) {
@@ -398,7 +399,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun launchImageConsumer() {
+    private fun launchScreenShareImageConsumer() {
         coroutineScope.launch(Dispatchers.IO) {
             while (isCapturing) {
                 try {
