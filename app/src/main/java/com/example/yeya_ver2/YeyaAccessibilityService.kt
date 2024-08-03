@@ -29,10 +29,18 @@ class YeyaAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         val info = serviceInfo
-        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
-        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES
-        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+        info.flags = info.flags or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE or
+                AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES or
+                AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         serviceInfo = info
+
+
+        Log.d(TAG, "YeyaAccessibilityService connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
