@@ -151,6 +151,11 @@ class ServerService : Service() {
 
     private fun startServerSendVideoCall() {
         Log.d(TAG, "Starting server send video call")
+        val intent = Intent(this, YeYaCallActivity::class.java).apply {
+            action = "SETUP_VIDEO_CALL_OVERLAY"
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     private fun startServerSendSpeakCall() {

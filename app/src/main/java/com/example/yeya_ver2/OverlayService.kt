@@ -334,10 +334,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     handleIncomingEvents()
 
                     // Start Video call
-                    startClientSendVideoCall()
-                    startClientSendSpeakCall()
-                    startClientReceiveVideoCall()
-                    startClientReceiveSpeakCall()
+                    withContext(Dispatchers.Main) {
+                        startClientSendVideoCall()
+                        startClientSendSpeakCall()
+                        startClientReceiveVideoCall()
+                        startClientReceiveSpeakCall()
+                    }
+
+
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -351,7 +355,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun startClientSendVideoCall() {
         Log.d(TAG, "Starting client send video call")
-        setupVideoCallOverlay()
+        Handler(Looper.getMainLooper()).post {
+            setupVideoCallOverlay()
+        }
     }
 
     private fun setupVideoCallOverlay() {
@@ -380,6 +386,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         var initialTouchX = 0f
         var initialTouchY = 0f
         var startClickTime = 0L
+        var totalMoveDistance = 0f
 
         videoCallOverlayView.setOnTouchListener { _, event ->
             when (event.action) {
@@ -389,21 +396,24 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     startClickTime = System.currentTimeMillis()
+                    totalMoveDistance = 0f
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - initialTouchX).toInt()
+                    val dy = (event.rawY - initialTouchY).toInt()
+                    params.x = initialX + dx
+                    params.y = initialY + dy
+                    windowManager.updateViewLayout(videoCallOverlayView, params)
+
+                    totalMoveDistance += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     val clickDuration = System.currentTimeMillis() - startClickTime
-                    if (clickDuration < 200) {  // Short click
+                    if (clickDuration < 200 && totalMoveDistance < 20) {
+                        // Consider it a tap if the duration is less than 200ms and total move distance is small
                         toggleFullscreen(params)
-                    }
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val moveDuration = System.currentTimeMillis() - startClickTime
-                    if (moveDuration > 200) {  // Long press and move
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(videoCallOverlayView, params)
                     }
                     true
                 }
@@ -612,13 +622,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         coroutineScope.launch(Dispatchers.IO) {
             try {
                 val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-                while (isActive) {
+                while (isActive && clientSocket?.isConnected == true) {
                     val message = reader.readLine() ?: break
                     Log.d(TAG, "Received event: $message")
                     processEvent(message)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
+            } finally {
+                // Handle disconnection
+                withContext(Dispatchers.Main) {
+                    // Update UI or handle reconnection
+                }
             }
         }
     }
@@ -710,63 +725,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-//    private fun handleIncomingTouchEvents() {
-//        coroutineScope.launch(Dispatchers.IO) {
-//            try {
-//                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-//                while (isActive) {
-//                    val message = reader.readLine() ?: break
-//                    Log.d(TAG, "Received touch event: $message")
-//                    processTouchEvent(message)
-//                }
-//            } catch (e: Exception) {
-//                Log.e(TAG, "Error handling incoming touch events", e)
-//            }
-//        }
-//    }
-//
-//    private fun processTouchEvent(message: String) {
-//        val parts = message.split("|")
-//        if (parts.size != 3 || parts[0] != "TOUCH") {
-//            Log.e(TAG, "Invalid touch event message: $message")
-//            return
-//        }
-//
-//        val action = when (parts[1]) {
-//            "DOWN" -> MotionEvent.ACTION_DOWN
-//            "MOVE" -> MotionEvent.ACTION_MOVE
-//            "UP" -> MotionEvent.ACTION_UP
-//            else -> {
-//                Log.e(TAG, "Unknown touch action: ${parts[1]}")
-//                return
-//            }
-//        }
-//
-//        val (x, y) = parts[2].split(",").map { it.toInt() }
-//        Log.d(TAG, "Processing touch event: action=$action, x=$x, y=$y")
-//
-//        // Use the same method that works for AI agent clicks
-//        performTouchAction(x, y, action)
-//    }
-//
-//    private fun performTouchAction(x: Int, y: Int, action: Int) {
-//        val path = Path()
-//        path.moveTo(x.toFloat(), y.toFloat())
-//
-//        val gestureBuilder = GestureDescription.Builder()
-//        val gestureStroke = GestureDescription.StrokeDescription(path, 0, 1)
-//        gestureBuilder.addStroke(gestureStroke)
-//
-//        val gesture = gestureBuilder.build()
-//        YeyaAccessibilityService.getInstance()?.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-//            override fun onCompleted(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture completed: action=$action, x=$x, y=$y")
-//            }
-//            override fun onCancelled(gestureDescription: GestureDescription?) {
-//                Log.d(TAG, "Gesture cancelled: action=$action, x=$x, y=$y")
-//            }
-//        }, null)
-//    }
+
 
 
     private fun vibrate() {
