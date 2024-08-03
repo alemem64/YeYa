@@ -174,6 +174,11 @@ class ServerService : Service() {
                     if (inputStream.read(sizeBuffer) == -1) break
                     val imageSize = ByteBuffer.wrap(sizeBuffer).int
 
+                    if (imageSize <= 0 || imageSize > 10_000_000) { // Set a reasonable max size
+                        Log.e(TAG, "Invalid image size: $imageSize")
+                        continue
+                    }
+
                     // Read image data
                     val imageData = ByteArray(imageSize)
                     var totalBytesRead = 0

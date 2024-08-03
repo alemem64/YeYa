@@ -126,6 +126,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var cameraManager: CameraManager
     private var cameraDevice: CameraDevice? = null
     private lateinit var cameraHandler: Handler
+    private val mainHandler = Handler(Looper.getMainLooper())
 
 
 
@@ -143,6 +144,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         initializeSpeechRecognizer()
         tts = TextToSpeech(this, this)
         startBufferProcessing()
+        initializeCameraHandler()
     }
 
     override fun onInit(status: Int) {
@@ -262,6 +264,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 else -> false
             }
         }
+    }
+
+    private fun initializeCameraHandler() {
+        val handlerThread = HandlerThread("CameraThread").apply { start() }
+        cameraHandler = Handler(handlerThread.looper)
     }
 
 
@@ -394,6 +401,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
         setupVideoCallOverlayTouchListener(params)
         setupFullscreenOverlay()
+        videoCallOverlayView.visibility = View.INVISIBLE
+        windowManager.addView(videoCallOverlayView, params)
     }
 
     private fun setupFullscreenOverlay() {
@@ -481,7 +490,23 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         isVideoCallFullscreen = !isVideoCallFullscreen
     }
 
+    private var isCameraReady = false
     private fun startClientCamera() {
+
+        if (!::cameraHandler.isInitialized) {
+            Log.e(TAG, "Camera handler not initialized")
+            return
+        }
+
+        if (videoCallOverlayView == null) {
+            Log.e(TAG, "Video call overlay not ready")
+            return
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Camera permission not granted")
+            return
+        }
         val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraId = cameraManager.cameraIdList.firstOrNull {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
@@ -493,7 +518,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 val image = reader.acquireLatestImage()
                 if (image != null) {
                     val bitmap = imageToBitmap(image)
-                    cameraHandler.post { updateCameraPreview(bitmap) }
+                    updateCameraPreview(bitmap)
+                    if (!isCameraReady) {
+                        isCameraReady = true
+                        mainHandler.post {
+                            showOverlay()
+                        }
+                    }
                     image.close()
                 }
             }, cameraHandler)
@@ -516,6 +547,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 Log.e(TAG, "Camera permission not granted", e)
             }
         }
+    }
+
+    private fun showOverlay() {
+        videoCallOverlayView.visibility = View.VISIBLE
+        // Show the CAPTURE button if it's separate
     }
 
     private fun openCamera(cameraManager: CameraManager, cameraId: String): CameraDevice? {
@@ -593,10 +629,11 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun updateCameraPreview(bitmap: Bitmap) {
-        videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)?.setImageBitmap(bitmap)
-
-        if (isVideoCallFullscreen) {
-            fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)?.setImageBitmap(bitmap)
+        mainHandler.post {
+            videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)?.setImageBitmap(bitmap)
+            if (isVideoCallFullscreen) {
+                fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)?.setImageBitmap(bitmap)
+            }
         }
     }
 
@@ -1180,6 +1217,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         coroutineScope.cancel()
         stopScreenSharing()
         cameraDevice?.close()
+        if (::cameraHandler.isInitialized) {
+            cameraHandler.looper.quitSafely()
+        }
         cameraHandler.looper.quit()
     }
 
