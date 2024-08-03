@@ -103,7 +103,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
 
-    private var imageReader: ImageReader? = null
+
     private var screenDensity: Int = 0
     private var screenWidth: Int = 0
     private var screenHeight: Int = 0
@@ -131,7 +131,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var isOverlayAdded = false
     private var isScreenSharingActive = false
 
-
+    private var screenImageReader: ImageReader? = null
+    private var cameraImageReader: ImageReader? = null
+    private var isCameraActive = true
 
 
 
@@ -509,6 +511,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private var isCameraReady = false
+    private val cameraPreviewScope = CoroutineScope(Dispatchers.Default + Job())
     private fun startClientCamera() {
 
         if (!::cameraHandler.isInitialized) {
@@ -531,18 +534,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         } ?: return
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            imageReader = ImageReader.newInstance(480, 480, ImageFormat.YUV_420_888, 2)
-            imageReader?.setOnImageAvailableListener({ reader ->
+            cameraImageReader = ImageReader.newInstance(480, 480, ImageFormat.YUV_420_888, 2)
+            cameraImageReader?.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
                 if (image != null) {
                     val bitmap = imageToBitmap(image)
                     updateCameraPreview(bitmap)
-                    if (!isCameraReady) {
-                        isCameraReady = true
-                        mainHandler.post {
-                            showOverlay()
-                        }
-                    }
                     image.close()
                 }
             }, cameraHandler)
@@ -563,6 +560,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }, cameraHandler)
             } catch (e: SecurityException) {
                 Log.e(TAG, "Camera permission not granted", e)
+            }
+            cameraPreviewScope.launch {
+                while (isCameraActive) {
+                    updateCameraPreview()
+                    delay(1000 / 30) // 30 FPS
+                }
             }
         }
     }
@@ -609,7 +612,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun createCaptureSession() {
-        val surfaces = listOf(imageReader?.surface ?: return)
+        val surfaces = listOf(cameraImageReader?.surface ?: return)
         cameraDevice?.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
                 val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)?.apply {
@@ -653,12 +656,26 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
+    private fun updateCameraPreview() {
+        cameraImageReader?.acquireLatestImage()?.use { image ->
+            val bitmap = imageToBitmap(image)
+            updateCameraPreview(bitmap)
+        }
+    }
+
     private fun updateCameraPreview(bitmap: Bitmap) {
         mainHandler.post {
             videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)?.setImageBitmap(bitmap)
             if (isVideoCallFullscreen) {
                 fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)?.setImageBitmap(bitmap)
             }
+        }
+    }
+
+    private fun updateUI(screenBitmap: Bitmap?, cameraBitmap: Bitmap?) {
+        mainHandler.post {
+            screenBitmap?.let { videoCallOverlayView.findViewById<ImageView>(R.id.serverVideoBox)?.setImageBitmap(it) }
+            cameraBitmap?.let { videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)?.setImageBitmap(it) }
         }
     }
 
@@ -674,32 +691,28 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     fun stopScreenSharing() {
         isScreenSharingActive = false
         virtualDisplay?.release()
-        imageReader?.close()
+        screenImageReader?.close()
     }
 
 
 
     private val imageLock = Any()
     private var isProcessingImage = false
+    private val screenSharingScope = CoroutineScope(Dispatchers.Default + Job())
 
     private fun startScreenRecordingAndSharing() {
-
         val metrics = resources.displayMetrics
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         screenWidth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val windowMetrics = windowManager.currentWindowMetrics
-            val bounds = windowMetrics.bounds
-            bounds.width()
+            windowManager.currentWindowMetrics.bounds.width()
         } else {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.width
         }
 
         screenHeight = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val windowMetrics = windowManager.currentWindowMetrics
-            val bounds = windowMetrics.bounds
-            bounds.height()
+            windowManager.currentWindowMetrics.bounds.height()
         } else {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.height
@@ -707,17 +720,25 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
         screenDensity = metrics.densityDpi
 
-        imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+        screenImageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenCapture",
             screenWidth, screenHeight, screenDensity,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface, null, null
+            screenImageReader?.surface, null, null
         )
 
         isRecording = true
         launchImageProducer()
         launchImageConsumer()
+
+        screenSharingScope.launch {
+            while (isScreenSharingActive) {
+                captureAndSendFrame()
+                delay(frameInterval)
+            }
+        }
     }
 
     private fun launchImageProducer() {
@@ -746,7 +767,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun captureAndEnqueueFrame() {
         withContext(Dispatchers.Default) {
             try {
-                val image = imageReader?.acquireLatestImage()
+                val image = screenImageReader?.acquireLatestImage()
                 if (image != null) {
                     val planes = image.planes
                     val buffer = planes[0].buffer
@@ -791,28 +812,34 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun captureAndSendFrame() {
-        imageReader?.acquireLatestImage()?.use { image ->
-            val planes = image.planes
-            val buffer = planes[0].buffer
-            val pixelStride = planes[0].pixelStride
-            val rowStride = planes[0].rowStride
-            val rowPadding = rowStride - pixelStride * screenWidth
 
-            val bitmap = Bitmap.createBitmap(
-                screenWidth + rowPadding / pixelStride, screenHeight,
-                Bitmap.Config.ARGB_8888
-            )
-            bitmap.copyPixelsFromBuffer(buffer)
+        try {
+            screenImageReader?.acquireLatestImage()?.use { image ->
+                val planes = image.planes
+                val buffer = planes[0].buffer
+                val pixelStride = planes[0].pixelStride
+                val rowStride = planes[0].rowStride
+                val rowPadding = rowStride - pixelStride * screenWidth
 
-            val targetWidth = screenWidth / 2
-            val targetHeight = screenHeight / 2
-            val compressQuality = 50
-            val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
+                val bitmap = Bitmap.createBitmap(
+                    screenWidth + rowPadding / pixelStride, screenHeight,
+                    Bitmap.Config.ARGB_8888
+                )
+                bitmap.copyPixelsFromBuffer(buffer)
 
-            coroutineScope.launch {
-                sendImageToServer(compressedImageData)
+                val targetWidth = screenWidth / 2
+                val targetHeight = screenHeight / 2
+                val compressQuality = 50
+                val compressedImageData = resizeAndCompressBitmap(bitmap, targetWidth, targetHeight, compressQuality)
+
+                coroutineScope.launch {
+                    sendImageToServer(compressedImageData)
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in captureAndSendFrame", e)
         }
+
     }
 
     private fun resizeAndCompressBitmap(original: Bitmap, targetWidth: Int, targetHeight: Int, quality: Int): ByteArray {
@@ -1279,10 +1306,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             windowManager.removeView(videoCallOverlayView)
             isOverlayAdded = false
         }
-        imageReader?.close()
+        screenImageReader?.close()
         mediaProjection?.stop()
         isScreenSharingActive = false
-        imageReader?.close()
+        cameraImageReader?.close()
+
+        screenSharingScope.cancel()
+        cameraPreviewScope.cancel()
     }
 
 
