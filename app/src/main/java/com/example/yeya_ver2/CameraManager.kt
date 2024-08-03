@@ -26,6 +26,7 @@ class CameraManager(private val context: Context) {
     private val cameraHandler = Handler(cameraThread.looper)
     private lateinit var cameraManager: Camera2Manager
 
+
     private fun checkCameraPermission(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
             context,

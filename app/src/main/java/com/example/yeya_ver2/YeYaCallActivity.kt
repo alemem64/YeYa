@@ -74,6 +74,8 @@ class YeYaCallActivity : AppCompatActivity() {
         localVideoView = findViewById(R.id.localVideoView)
         endCallButton = findViewById(R.id.endCallButton)
 
+        screenShareImageView = findViewById(R.id.screenShareImageView)
+
         endCallButton.setOnClickListener {
             endCall()
         }

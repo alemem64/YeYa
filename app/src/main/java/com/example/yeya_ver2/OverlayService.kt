@@ -137,6 +137,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         audioManager = AudioManager(this)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         setupVideoOverlay()
+        cameraManager = CameraManager(this)
     }
 
     override fun onInit(status: Int) {
@@ -845,6 +846,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun YVC_startComponents() {
         YVC_isActive = true
+        cameraManager.startCamera()
         YVC_launchVideoCaptureProducer()
         YVC_launchAudioCaptureProducer()
         YVC_launchVideoConsumer()

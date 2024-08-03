@@ -274,7 +274,9 @@ class ServerService : Service() {
                 val inputStream = client.getInputStream()
                 val buffer = ByteArray(1024)
                 while (true) {
-                    val type = String(buffer, 0, inputStream.read(buffer, 0, 5))
+                    val bytesRead = inputStream.read(buffer, 0, 5)
+                    if (bytesRead <= 0) break
+                    val type = String(buffer, 0, bytesRead)
                     val sizeBuffer = ByteArray(4)
                     inputStream.read(sizeBuffer)
                     val size = ByteBuffer.wrap(sizeBuffer).int
