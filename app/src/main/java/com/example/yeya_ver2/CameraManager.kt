@@ -41,6 +41,7 @@ class CameraManager(private val context: Context) {
             return
         }
 
+
         cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as Camera2Manager
         val cameraId = cameraManager.cameraIdList.first {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
