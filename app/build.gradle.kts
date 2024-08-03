@@ -46,5 +46,4 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.10.0")
     implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.5.2")
 
-    implementation ("com.github.fancycode:android-opus:1.0.1")
 }

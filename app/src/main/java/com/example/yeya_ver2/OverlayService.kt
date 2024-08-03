@@ -599,15 +599,33 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
     private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
-            try {
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-                while (isActive) {
-                    val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received event: $message")
-                    processEvent(message)
+            while (isActive) {
+                try {
+                    val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
+                    while (isActive) {
+                        val message = reader.readLine() ?: break
+                        Log.d(TAG, "Received event: $message")
+                        processEvent(message)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error handling incoming events", e)
+                    delay(5000) // Wait before attempting to reconnect
+                    reconnectToServer()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error handling incoming events", e)
+            }
+        }
+    }
+
+    private fun reconnectToServer() {
+        coroutineScope.launch {
+            while (isActive) {
+                try {
+                    connectToServer()
+                    break
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to reconnect", e)
+                    delay(5000) // Wait before next attempt
+                }
             }
         }
     }
@@ -716,13 +734,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun sendVideoFrame(imageData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                val outputStream = SocketManager.getOutputStream()
+                val outputStream = clientSocket?.getOutputStream()
                 outputStream?.write("VIDEO".toByteArray())
                 outputStream?.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
                 outputStream?.write(imageData)
                 outputStream?.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending video frame", e)
+                reconnectToServer()
             }
         }
     }
@@ -742,13 +761,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private suspend fun sendAudioData(audioData: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                val outputStream = SocketManager.getOutputStream()
+                val outputStream = clientSocket?.getOutputStream()
                 outputStream?.write("AUDIO".toByteArray())
                 outputStream?.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
                 outputStream?.write(audioData)
                 outputStream?.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending audio data", e)
+                reconnectToServer()
             }
         }
     }

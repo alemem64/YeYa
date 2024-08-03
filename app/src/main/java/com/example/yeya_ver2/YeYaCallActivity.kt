@@ -30,7 +30,8 @@ class YeYaCallActivity : AppCompatActivity() {
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
     private var socketOutputStream: OutputStream? = null
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + Job())
+    private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
+
     private var isReconnecting = false
     private val reconnectDelay = 5000L // 5 seconds
     private lateinit var cameraManager: CameraManager
@@ -42,6 +43,8 @@ class YeYaCallActivity : AppCompatActivity() {
     companion object {
         var instance: YeYaCallActivity? = null
     }
+
+
 
 
 
@@ -71,6 +74,14 @@ class YeYaCallActivity : AppCompatActivity() {
         endCallButton.setOnClickListener {
             endCall()
         }
+
+        startVideoCall()
+    }
+
+    private fun startVideoCall() {
+        startCameraCapture()
+        startAudioCapture()
+        receiveVideoAndAudio()
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
@@ -222,9 +233,23 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private fun startCameraCapture() {
         cameraManager.startCamera { imageData ->
-            // Send imageData to client
             coroutineScope.launch {
-                sendImageToClient(imageData)
+                sendVideoFrame(imageData)
+            }
+        }
+    }
+
+    private suspend fun sendVideoFrame(imageData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                SocketManager.getOutputStream()?.let { outputStream ->
+                    outputStream.write("VIDEO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
+                    outputStream.write(imageData)
+                    outputStream.flush()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending video frame", e)
             }
         }
     }
@@ -254,7 +279,22 @@ class YeYaCallActivity : AppCompatActivity() {
     private fun startAudioCapture() {
         coroutineScope.launch {
             audioManager.startAudioCapture { audioData ->
-                sendAudioToClient(audioData)
+                sendAudioData(audioData)
+            }
+        }
+    }
+
+    private suspend fun sendAudioData(audioData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                SocketManager.getOutputStream()?.let { outputStream ->
+                    outputStream.write("AUDIO".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(audioData.size).array())
+                    outputStream.write(audioData)
+                    outputStream.flush()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending audio data", e)
             }
         }
     }
@@ -262,6 +302,30 @@ class YeYaCallActivity : AppCompatActivity() {
     private suspend fun sendAudioToClient(audioData: ByteArray) {
         // Implement the logic to send audio data to the client
         // You can use the existing socket connection or create a new one for audio
+    }
+
+    private fun receiveVideoAndAudio() {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = SocketManager.getClientSocket()?.getInputStream()
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val type = String(buffer, 0, inputStream?.read(buffer, 0, 5) ?: 0)
+                    val sizeBuffer = ByteArray(4)
+                    inputStream?.read(sizeBuffer)
+                    val size = ByteBuffer.wrap(sizeBuffer).int
+                    val data = ByteArray(size)
+                    inputStream?.read(data)
+
+                    when (type) {
+                        "VIDEO" -> updateVideoDisplay(data)
+                        "AUDIO" -> playAudioData(data)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error receiving video/audio data", e)
+            }
+        }
     }
 
     private fun stopAudioCapture() {
@@ -273,7 +337,10 @@ class YeYaCallActivity : AppCompatActivity() {
     }
 
     private fun endCall() {
-        // Implement call ending logic
+        cameraManager.stopCamera()
+        audioManager.stopAudioCapture()
+        audioManager.stopAudioPlayback()
+        SocketManager.getClientSocket()?.close()
         finish()
     }
 
@@ -283,6 +350,12 @@ class YeYaCallActivity : AppCompatActivity() {
             remoteVideoView.setImageBitmap(bitmap)
         }
     }
+
+    private suspend fun playAudioData(audioData: ByteArray) {
+        audioManager.playAudio(audioData)
+    }
+
+
 
     private suspend fun updateLocalVideoDisplay(imageData: ByteArray) {
         withContext(Dispatchers.Main) {

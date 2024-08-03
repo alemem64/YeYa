@@ -288,7 +288,8 @@ class ServerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling video call data", e)
-                reconnectClient()
+                client.close()
+                startServer() // Restart the server to accept new connections
             }
         }
     }
