@@ -64,6 +64,8 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
@@ -72,7 +74,7 @@ import android.os.SystemClock
 import android.view.Surface
 import android.widget.ImageView
 import java.util.concurrent.CountDownLatch
-
+import java.util.concurrent.Executors
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -120,6 +122,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var isVideoCallFullscreen = false
     private var originalX = 0
     private var originalY = 0
+
+    private lateinit var cameraManager: CameraManager
+    private var cameraDevice: CameraDevice? = null
+    private lateinit var cameraHandler: Handler
 
 
 
@@ -479,33 +485,36 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraId = cameraManager.cameraIdList.firstOrNull {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
-        } ?: run {
-            Log.e(TAG, "Front camera not found")
-            return
-        }
+        } ?: return
 
-        try {
-            val imageReader = ImageReader.newInstance(480, 480, ImageFormat.JPEG, 2)
-            val cameraDevice = openCamera(cameraManager, cameraId) ?: run {
-                Log.e(TAG, "Failed to open camera")
-                return
-            }
-
-            val captureRequest = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(imageReader.surface)
-            }
-
-            val captureSession = createCaptureSession(cameraDevice, listOf(imageReader.surface))
-            captureSession.setRepeatingRequest(captureRequest.build(), null, null)
-
-            imageReader.setOnImageAvailableListener({ reader ->
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            imageReader = ImageReader.newInstance(480, 480, ImageFormat.YUV_420_888, 2)
+            imageReader?.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
-                val bitmap = imageToBitmap(image)
-                updateCameraPreview(bitmap)
-                image.close()
-            }, null)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting camera", e)
+                if (image != null) {
+                    val bitmap = imageToBitmap(image)
+                    cameraHandler.post { updateCameraPreview(bitmap) }
+                    image.close()
+                }
+            }, cameraHandler)
+
+            try {
+                cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                    override fun onOpened(camera: CameraDevice) {
+                        cameraDevice = camera
+                        createCaptureSession()
+                    }
+                    override fun onDisconnected(camera: CameraDevice) {
+                        camera.close()
+                    }
+                    override fun onError(camera: CameraDevice, error: Int) {
+                        Log.e(TAG, "Camera open error: $error")
+                        camera.close()
+                    }
+                }, cameraHandler)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Camera permission not granted", e)
+            }
         }
     }
 
@@ -545,41 +554,52 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         return cameraDevice
     }
 
-    private fun createCaptureSession(cameraDevice: CameraDevice, surfaces: List<Surface>): CameraCaptureSession {
-        val latch = CountDownLatch(1)
-        var captureSession: CameraCaptureSession? = null
-
-        cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+    private fun createCaptureSession() {
+        val surfaces = listOf(imageReader?.surface ?: return)
+        cameraDevice?.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
-                captureSession = session
-                latch.countDown()
-            }
+                val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)?.apply {
+                    addTarget(surfaces.first())
+                }?.build()
 
+                captureRequest?.let { session.setRepeatingRequest(it, null, cameraHandler) }
+            }
             override fun onConfigureFailed(session: CameraCaptureSession) {
-                // Handle configuration failure
+                Log.e(TAG, "Failed to configure camera session")
             }
-        }, null)
-
-        latch.await()
-        return captureSession!!
+        }, cameraHandler)
     }
 
     private fun imageToBitmap(image: Image): Bitmap {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.capacity())
-        buffer.get(bytes)
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, null)
+        val yBuffer = image.planes[0].buffer
+        val uBuffer = image.planes[1].buffer
+        val vBuffer = image.planes[2].buffer
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
+        val imageBytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
     }
 
     private fun updateCameraPreview(bitmap: Bitmap) {
-        val clientVideoBox = videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)
-        clientVideoBox.setImageBitmap(bitmap)
+        videoCallOverlayView.findViewById<ImageView>(R.id.clientVideoBox)?.setImageBitmap(bitmap)
 
         if (isVideoCallFullscreen) {
-            val fullscreenClientVideoBox = fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)
-            fullscreenClientVideoBox.setImageBitmap(bitmap)
+            fullscreenOverlayView.findViewById<ImageView>(R.id.clientVideoFullBox)?.setImageBitmap(bitmap)
         }
     }
+
 
 
 
@@ -1159,6 +1179,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         clientSocket?.close()
         coroutineScope.cancel()
         stopScreenSharing()
+        cameraDevice?.close()
+        cameraHandler.looper.quit()
     }
 
     private fun stopScreenSharing() {
