@@ -33,6 +33,9 @@ class YeYaCallActivity : AppCompatActivity() {
         var instance: YeYaCallActivity? = null
     }
 
+    private lateinit var ydpImageView: ImageView
+
+
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,8 +44,9 @@ class YeYaCallActivity : AppCompatActivity() {
         setContentView(R.layout.activity_yeyacall)
 
         screenShareImageView = findViewById(R.id.screenShareImageView)
-        if (screenShareImageView == null) {
-            Log.e("YeYaCallActivity", "screenShareImageView not found in layout")
+        ydpImageView = findViewById(R.id.ydpImageView)
+        if (screenShareImageView == null || ydpImageView == null) {
+            Log.e("YeYaCallActivity", "ImageView not found in layout")
             finish()
             return
         }
@@ -72,8 +76,6 @@ class YeYaCallActivity : AppCompatActivity() {
             return false
         }
 
-        val imageWidth = screenShareImageView.width
-        val imageHeight = screenShareImageView.height
 
         val drawable = screenShareImageView.drawable
         if (drawable == null) {
@@ -116,23 +118,6 @@ class YeYaCallActivity : AppCompatActivity() {
         return true
     }
 
-    private fun sendClickEventToClient(x: Int, y: Int) {
-        coroutineScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    socketOutputStream?.let { outputStream ->
-                        val message = "CLICK|$x,$y\n"
-                        outputStream.write(message.toByteArray())
-                        outputStream.flush()
-                        Log.d("YeYaCallActivity", "Sent click event: $message")
-                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
-                }
-            } catch (e: Exception) {
-                Log.e("YeYaCallActivity", "Error sending click event to client", e)
-                reconnectToClient()
-            }
-        }
-    }
 
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
@@ -151,19 +136,36 @@ class YeYaCallActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == "UPDATE_SCREEN_SHARE") {
-            val imageData = intent.getByteArrayExtra("imageData")
-            if (imageData != null) {
-                updateScreenShare(imageData)
+        when (intent?.action) {
+            "UPDATE_SCREEN_SHARE" -> {
+                val imageData = intent.getByteArrayExtra("imageData")
+                if (imageData != null) {
+                    updateScreenShare(imageData)
+                }
+            }
+            "UPDATE_YDP_IMAGE" -> {
+                val ydpImageData = intent.getByteArrayExtra("ydpImageData")
+                if (ydpImageData != null) {
+                    updateYDPImage(ydpImageData)
+                }
             }
         }
     }
+
 
     private fun updateScreenShare(imageData: ByteArray) {
         val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
         runOnUiThread {
             screenShareImageView.setImageBitmap(bitmap)
             screenShareImageView.scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+    }
+
+    private fun updateYDPImage(imageData: ByteArray) {
+        val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+        runOnUiThread {
+            ydpImageView.setImageBitmap(bitmap)
+            ydpImageView.scaleType = ImageView.ScaleType.FIT_CENTER
         }
     }
 

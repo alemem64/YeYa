@@ -162,12 +162,17 @@ class ServerService : Service() {
         coroutineScope.launch(Dispatchers.IO) {
             val inputStream = BufferedInputStream(client.inputStream)
             val sizeBuffer = ByteArray(4)
+            val identifierBuffer = ByteArray(3)
 
             try {
                 while (!client.isClosed) {
                     // Read image size
                     if (inputStream.read(sizeBuffer) == -1) break
                     val imageSize = ByteBuffer.wrap(sizeBuffer).int
+
+                    // Read identifier
+                    if (inputStream.read(identifierBuffer) == -1) break
+                    val identifier = String(identifierBuffer)
 
                     // Read image data
                     val imageData = ByteArray(imageSize)
@@ -179,12 +184,19 @@ class ServerService : Service() {
                     }
 
                     if (totalBytesRead == imageSize) {
-                        Log.d(TAG, "Image Received (Size: $imageSize bytes)")
-                        // Update image in YeYaCallService
-                        val intent = Intent(this@ServerService, YeYaCallService::class.java)
-                        intent.action = "UPDATE_SCREEN_SHARE"
-                        intent.putExtra("imageData", imageData)
-                        startService(intent)
+                        when (identifier) {
+                            "YDP" -> {
+                                Log.d(TAG, "YDP Image Received (Size: $imageSize bytes)")
+                                handleYDPImage(imageData)
+                            }
+                            else -> {
+                                Log.d(TAG, "Screen Sharing Image Received (Size: $imageSize bytes)")
+                                val intent = Intent(this@ServerService, YeYaCallService::class.java)
+                                intent.action = "UPDATE_SCREEN_SHARE"
+                                intent.putExtra("imageData", imageData)
+                                startService(intent)
+                            }
+                        }
                     } else {
                         Log.e(TAG, "Incomplete image received")
                     }
@@ -264,6 +276,14 @@ class ServerService : Service() {
                 }
             }
         }
+    }
+
+    private fun handleYDPImage(imageData: ByteArray) {
+        val intent = Intent(this, YeYaCallActivity::class.java)
+        intent.action = "UPDATE_YDP_IMAGE"
+        intent.putExtra("ydpImageData", imageData)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(intent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
