@@ -75,6 +75,7 @@ import android.view.Surface
 import android.widget.ImageView
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import android.graphics.Matrix
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -127,6 +128,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var cameraDevice: CameraDevice? = null
     private lateinit var cameraHandler: Handler
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var isOverlayAdded = false
 
 
 
@@ -363,7 +365,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                         startClientCamera()
                     }
 
-
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -383,6 +384,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun setupVideoCallOverlay() {
+        if (isOverlayAdded) {
+            Log.d(TAG, "Overlay already added, updating existing view")
+            updateOverlayView()
+            return
+        }
+
         val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
         videoCallOverlayView = inflater.inflate(R.layout.video_call_overlay, null)
 
@@ -397,12 +404,22 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         params.x = 100
         params.y = 100
 
-        windowManager.addView(videoCallOverlayView, params)
+        try {
+            windowManager.addView(videoCallOverlayView, params)
+            isOverlayAdded = true
+            Log.d(TAG, "Overlay added successfully")
+        } catch (e: IllegalStateException) {
+            Log.e(TAG, "Error adding overlay view", e)
+        }
 
         setupVideoCallOverlayTouchListener(params)
         setupFullscreenOverlay()
-        videoCallOverlayView.visibility = View.INVISIBLE
-        windowManager.addView(videoCallOverlayView, params)
+    }
+
+    private fun updateOverlayView() {
+        // Update the existing overlay view if needed
+        // For example, you might want to refresh the content or change its visibility
+        videoCallOverlayView.visibility = View.VISIBLE
     }
 
     private fun setupFullscreenOverlay() {
@@ -625,7 +642,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val out = ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
         val imageBytes = out.toByteArray()
-        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+
+        // Rotate the bitmap 90 degrees counter-clockwise
+        val matrix = Matrix()
+        matrix.postRotate(-90f)
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private fun updateCameraPreview(bitmap: Bitmap) {
@@ -1221,6 +1243,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             cameraHandler.looper.quitSafely()
         }
         cameraHandler.looper.quit()
+        if (isOverlayAdded) {
+            windowManager.removeView(videoCallOverlayView)
+            isOverlayAdded = false
+        }
     }
 
     private fun stopScreenSharing() {
