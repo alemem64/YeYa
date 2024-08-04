@@ -18,6 +18,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.util.Size
+import android.view.ViewGroup
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import androidx.camera.core.ImageProxy
+
+
+
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -32,12 +49,11 @@ class YeYaCallActivity : AppCompatActivity() {
 
     companion object {
         var instance: YeYaCallActivity? = null
+        private const val TAG = "YeYaCallActivity"
     }
 
-    private lateinit var videoCallOverlayView: View
-    private var isVideoCallFullscreen = false
-    private var originalX = 0
-    private var originalY = 0
+    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var previewView: ImageView
 
 
 
@@ -59,8 +75,104 @@ class YeYaCallActivity : AppCompatActivity() {
         screenShareImageView.setOnTouchListener(::onTouchEvent)
 
         handleIntent(intent)
+
+        // Initialize cameraExecutor
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Initialize previewView
+        previewView = ImageView(this)
+        previewView.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
+        findViewById<ViewGroup>(R.id.root_layout).addView(previewView)
+
+        setUpServerCamera()
+
         Log.d(TAG, "YeYaCallActivity onCreate completed")
     }
+
+    private fun setUpServerCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build()
+
+            val imageAnalyzer = ImageAnalysis.Builder()
+                .setTargetResolution(Size(480, 480))
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(cameraExecutor, ImageAnalyzer { bitmap ->
+                        runOnUiThread {
+                            previewView.setImageBitmap(bitmap)
+                        }
+                    })
+                }
+
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    this, cameraSelector, preview, imageAnalyzer
+                )
+            } catch (exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private class ImageAnalyzer(private val listener: (Bitmap) -> Unit) : ImageAnalysis.Analyzer {
+        override fun analyze(image: ImageProxy) {
+            val bitmap = image.toBitmap()
+            val processedBitmap = rotateFlipAndProcessBitmap(bitmap)
+            listener(processedBitmap)
+            image.close()
+        }
+
+        private fun rotateFlipAndProcessBitmap(originalBitmap: Bitmap): Bitmap {
+            val matrix = Matrix().apply {
+                postRotate(90f)
+                postScale(-1f, 1f, originalBitmap.width / 2f, originalBitmap.height / 2f)
+            }
+            var rotatedFlippedBitmap = Bitmap.createBitmap(
+                originalBitmap, 0, 0,
+                originalBitmap.width, originalBitmap.height,
+                matrix, true
+            )
+
+            // Crop to 480x480
+            val dimension = minOf(rotatedFlippedBitmap.width, rotatedFlippedBitmap.height, 480)
+            val x = (rotatedFlippedBitmap.width - dimension) / 2
+            val y = (rotatedFlippedBitmap.height - dimension) / 2
+            val croppedBitmap = Bitmap.createBitmap(rotatedFlippedBitmap, x, y, dimension, dimension)
+
+            // Compress
+            val outputStream = ByteArrayOutputStream()
+            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 20, outputStream)
+            val compressedByteArray = outputStream.toByteArray()
+
+            // Clean up
+            if (rotatedFlippedBitmap != originalBitmap) {
+                originalBitmap.recycle()
+            }
+            if (croppedBitmap != rotatedFlippedBitmap) {
+                rotatedFlippedBitmap.recycle()
+            }
+
+            return BitmapFactory.decodeByteArray(compressedByteArray, 0, compressedByteArray.size)
+        }
+
+    }
+
+
+
+
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
         clientScreenWidth = width
@@ -82,8 +194,6 @@ class YeYaCallActivity : AppCompatActivity() {
             return false
         }
 
-        val imageWidth = screenShareImageView.width
-        val imageHeight = screenShareImageView.height
 
         val drawable = screenShareImageView.drawable
         if (drawable == null) {
@@ -126,25 +236,7 @@ class YeYaCallActivity : AppCompatActivity() {
         return true
     }
 
-    private fun sendClickEventToClient(x: Int, y: Int) {
-        coroutineScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    socketOutputStream?.let { outputStream ->
-                        val message = "CLICK|$x,$y\n"
-                        outputStream.write(message.toByteArray())
-                        outputStream.flush()
-                        Log.d("YeYaCallActivity", "Sent click event: $message")
-                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
-                }
-            } catch (e: Exception) {
-                Log.e("YeYaCallActivity", "Error sending click event to client", e)
-                reconnectToClient()
-            }
-        }
-    }
 
-// In YeYaCallActivity.kt
 
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
@@ -217,6 +309,33 @@ class YeYaCallActivity : AppCompatActivity() {
         super.onDestroy()
         instance = null
         coroutineScope.cancel()
+        cameraExecutor.shutdown()
     }
 
+
+}
+
+fun ImageProxy.toBitmap(): Bitmap {
+    val buffer = planes[0].buffer
+    buffer.rewind()
+    val bytes = ByteArray(buffer.capacity())
+    buffer.get(bytes)
+
+    return when (format) {
+        // ImageFormat.JPEG
+        256 -> {
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+        // ImageFormat.YUV_420_888
+        35 -> {
+            val yuvImage = YuvImage(bytes, ImageFormat.NV21, width, height, null)
+            val out = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
+            val imageBytes = out.toByteArray()
+            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        }
+        else -> {
+            throw IllegalArgumentException("Unsupported image format: $format")
+        }
+    }
 }
