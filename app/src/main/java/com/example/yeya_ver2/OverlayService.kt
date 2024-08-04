@@ -334,13 +334,12 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     // Handle incoming click events
                     handleIncomingEvents()
 
-                    // Start Video call
-                    withContext(Dispatchers.Main) {
-                        startClientSendVideoCall()
-                        startClientSendSpeakCall()
-                        startClientReceiveVideoCall()
-                        startClientReceiveSpeakCall()
+                    // Set up VideoCall Overlay
+                    Handler(Looper.getMainLooper()).post {
+                        setupVideoCallOverlay()
                     }
+
+
 
 
                 } else {
@@ -354,12 +353,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun startClientSendVideoCall() {
-        Log.d(TAG, "Starting client send video call")
-        Handler(Looper.getMainLooper()).post {
-            setupVideoCallOverlay()
-        }
-    }
+
 
     private fun setupVideoCallOverlay() {
         val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
@@ -467,17 +461,6 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         isVideoCallFullscreen = !isVideoCallFullscreen
     }
 
-    private fun startClientSendSpeakCall() {
-        Log.d(TAG, "Starting client send speak call")
-    }
-
-    private fun startClientReceiveVideoCall() {
-        Log.d(TAG, "Starting client receive video call")
-    }
-
-    private fun startClientReceiveSpeakCall() {
-        Log.d(TAG, "Starting client receive speak call")
-    }
 
 
     private val imageLock = Any()
