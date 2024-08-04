@@ -32,9 +32,7 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import androidx.camera.core.ImageProxy
-
-
-
+import java.nio.ByteBuffer
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -109,7 +107,7 @@ class YeYaCallActivity : AppCompatActivity() {
                     it.setAnalyzer(cameraExecutor, ImageAnalyzer { bitmap ->
                         runOnUiThread {
                             previewView.setImageBitmap(bitmap)
-                            onNewFrameProcessed(bitmap)
+                            sendServerCameraImage(bitmap)
                         }
                     })
                 }
@@ -128,8 +126,27 @@ class YeYaCallActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun onNewFrameProcessed(bitmap: Bitmap) {
+    private fun sendServerCameraImage(bitmap: Bitmap) {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val outputStream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 50, outputStream)
+                val imageBytes = outputStream.toByteArray()
+                val imageSize = imageBytes.size
 
+                socketOutputStream?.let { output ->
+                    // Add multiplexing identifier '4' for server camera
+                    output.write("4".toByteArray())
+                    output.write(ByteBuffer.allocate(4).putInt(imageSize).array())
+                    output.write(imageBytes)
+                    output.flush()
+                    Log.d(TAG, "Sent server camera image: $imageSize bytes")
+                } ?: Log.e(TAG, "SocketOutputStream is null")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending server camera image", e)
+                reconnectToClient()
+            }
+        }
     }
 
 

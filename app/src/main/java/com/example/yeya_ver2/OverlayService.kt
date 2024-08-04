@@ -72,7 +72,7 @@ import android.hardware.camera2.*
 import android.util.Size
 import android.view.Surface
 import android.widget.ImageView
-
+import java.nio.ByteOrder
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -780,24 +780,30 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-                while (isActive && clientSocket?.isConnected == true) {
-                    val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received event: $message")
+                val inputStream = clientSocket?.inputStream ?: return@launch
+                val buffer = ByteArray(1024 * 1024) // 1MB buffer
 
-                    when (message[0]) {
-                        '0' -> processRemoteControlEvent(message.substring(1))
-                        '2' -> processAudioEvent(message.substring(1))
-                        '4' -> processServerCameraEvent(message.substring(1))
-                        else -> Log.e(TAG, "Unknown event type: ${message[0]}")
+                while (isActive && clientSocket?.isConnected == true) {
+                    val identifier = inputStream.read().toChar()
+                    when (identifier) {
+                        '0' -> processRemoteControlEvent(inputStream.readBytes().toString(Charsets.UTF_8))
+                        '2' -> processAudioEvent(inputStream.readBytes().toString(Charsets.UTF_8))
+                        '4' -> {
+                            val sizeBytes = ByteArray(4)
+                            inputStream.read(sizeBytes)
+                            val size = ByteBuffer.wrap(sizeBytes).order(ByteOrder.BIG_ENDIAN).int
+                            val imageData = ByteArray(size)
+                            inputStream.read(imageData)
+                            processServerCameraEvent(imageData)
+                        }
+                        else -> Log.e(TAG, "Unknown event type: $identifier")
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
             } finally {
-                // Handle disconnection
                 withContext(Dispatchers.Main) {
-                    // Update UI or handle reconnection
+                    // Handle disconnection
                 }
             }
         }
@@ -827,9 +833,29 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         Log.d(TAG, "Received audio event: $message")
     }
 
-    private fun processServerCameraEvent(message: String) {
-        // TODO: Implement server camera event processing
-        Log.d(TAG, "Received server camera event: $message")
+    private fun processServerCameraEvent(imageData: ByteArray) {
+        try {
+            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+
+            // Resize the bitmap to fit the bottom half of the 480x960 box
+            val resizedBitmap = Bitmap.createScaledBitmap(bitmap, 480, 480, true)
+
+            Handler(Looper.getMainLooper()).post {
+                updateServerCameraImage(resizedBitmap)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing server camera event", e)
+        }
+    }
+
+    private fun updateServerCameraImage(bitmap: Bitmap) {
+        val serverVideoBox = videoCallOverlayView.findViewById<ImageView>(R.id.serverVideoBox)
+        serverVideoBox.setImageBitmap(bitmap)
+
+        if (isVideoCallFullscreen) {
+            val serverVideoBoxFullscreen = fullscreenOverlayView.findViewById<ImageView>(R.id.serverVideoFullBox)
+            serverVideoBoxFullscreen.setImageBitmap(bitmap)
+        }
     }
 
     private var currentPath: Path? = null
