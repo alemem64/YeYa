@@ -21,6 +21,7 @@ import kotlinx.coroutines.*
 
 
 class YeYaCallActivity : AppCompatActivity() {
+    private var TAG = "YeYaCallActivity"
     private lateinit var screenShareImageView: ImageView
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
@@ -44,17 +45,21 @@ class YeYaCallActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         setContentView(R.layout.activity_yeyacall)
+        Log.d(TAG, "YeYaCallActivity onCreate called")
 
         screenShareImageView = findViewById(R.id.screenShareImageView)
         if (screenShareImageView == null) {
-            Log.e("YeYaCallActivity", "screenShareImageView not found in layout")
+            Log.e(TAG, "screenShareImageView not found in layout")
             finish()
             return
         }
 
+        Log.d(TAG, "screenShareImageView initialized")
+
         screenShareImageView.setOnTouchListener(::onTouchEvent)
 
         handleIntent(intent)
+        Log.d(TAG, "YeYaCallActivity onCreate completed")
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {

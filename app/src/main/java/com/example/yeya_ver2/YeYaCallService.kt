@@ -71,10 +71,14 @@ class YeYaCallService : Service() {
         }
         startActivity(activityIntent)
 
-
         Handler(Looper.getMainLooper()).postDelayed({
             val activity = YeYaCallActivity.instance
-            activity?.setClientScreenInfo(width, height, outputStream)
+            if (activity != null) {
+                activity.setClientScreenInfo(width, height, outputStream)
+                Log.d(TAG, "YeYaCallActivity initialized with screen info")
+            } else {
+                Log.e(TAG, "YeYaCallActivity instance is null")
+            }
         }, 500) // Delay to ensure activity is created
     }
 

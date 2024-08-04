@@ -148,14 +148,17 @@ class ServerService : Service() {
     private fun handleIncomingEvents(client: Socket) {
         coroutineScope.launch(Dispatchers.IO) {
             val inputStream = BufferedInputStream(client.inputStream)
-            val sizeBuffer = ByteArray(4)
 
             try {
                 while (!client.isClosed) {
                     val eventType = inputStream.read().toChar()
+                    Log.d(TAG, "Received event type: $eventType")
                     when (eventType) {
+                        '0' -> processRemoteControlEvent(inputStream)
                         '1' -> processAudioEvent(inputStream)
+                        '2' -> processServerAudioEvent(inputStream)
                         '3' -> receiveScreenSharing(inputStream)
+                        '4' -> processServerCameraEvent(inputStream)
                         else -> Log.e(TAG, "Unknown event type: $eventType")
                     }
                 }
@@ -163,9 +166,27 @@ class ServerService : Service() {
                 Log.e(TAG, "Error in handleIncomingEvents", e)
             } finally {
                 client.close()
+                Log.d(TAG, "Client socket closed")
             }
         }
     }
+
+    private fun processRemoteControlEvent(inputStream: BufferedInputStream) {
+        // Implement remote control event processing
+        Log.d(TAG, "Processing remote control event")
+    }
+
+    private fun processServerAudioEvent(inputStream: BufferedInputStream) {
+        // Implement server audio event processing
+        Log.d(TAG, "Processing server audio event")
+    }
+
+    private fun processServerCameraEvent(inputStream: BufferedInputStream) {
+        // Implement server camera event processing
+        Log.d(TAG, "Processing server camera event")
+    }
+
+
 
     private fun processAudioEvent(inputStream: BufferedInputStream) {
         // TODO: Implement audio event processing

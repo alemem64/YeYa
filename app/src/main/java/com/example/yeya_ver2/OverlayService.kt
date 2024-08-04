@@ -740,15 +740,27 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     // Add multiplexing identifier '3' for screen sharing
                     outputStream.write("3".toByteArray())
                     outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                    Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
                     outputStream.write(imageData)
                     outputStream.flush()
+                    Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
+                } else {
+                    Log.e(TAG, "Socket is closed. Attempting to reconnect...")
+                    reconnectToServer()
                 }
+            } ?: run {
+                Log.e(TAG, "Client socket is null. Attempting to reconnect...")
+                reconnectToServer()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error sending image to server", e)
-            // Implement reconnection logic here if needed
+            reconnectToServer()
         }
+    }
+
+    private suspend fun reconnectToServer() {
+        // Implement reconnection logic here
+        // For example, you can call the connectToServer() function again
+        connectToServer()
     }
 
     private fun getScreenDimensions(): Pair<Int, Int> {
