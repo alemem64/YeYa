@@ -45,6 +45,9 @@ import java.util.*
 import android.Manifest
 import android.accessibilityservice.GestureDescription
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.net.wifi.WifiManager
 import android.util.DisplayMetrics
 import androidx.core.app.ActivityCompat
@@ -62,7 +65,13 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import kotlinx.coroutines.channels.Channel
 import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.os.SystemClock
+import android.hardware.camera2.*
+import android.util.Size
+import android.view.Surface
+import android.widget.ImageView
 
 
 
@@ -111,6 +120,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var isVideoCallFullscreen = false
     private var originalX = 0
     private var originalY = 0
+
+    private lateinit var cameraManager: CameraManager
+    private var cameraDevice: CameraDevice? = null
+    private var cameraCaptureSession: CameraCaptureSession? = null
+    private var clientCameraImageReader: ImageReader? = null
+    private lateinit var clientVideoBox: ImageView
+    private lateinit var clientVideoBoxFullscreen: ImageView
 
 
 
@@ -374,10 +390,129 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
         setupVideoCallOverlayTouchListener(params)
         setupFullscreenOverlay()
+
+        // 전면 카메라 설정
+        clientVideoBox = videoCallOverlayView.findViewById(R.id.clientVideoBox)
+        setupFrontCamera()
     }
+
+    private fun setupFrontCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Camera permission not granted")
+            return
+        }
+
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = cameraManager.cameraIdList.find {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        }
+
+        if (cameraId != null) {
+            clientCameraImageReader = ImageReader.newInstance(480, 480, ImageFormat.YUV_420_888, 2)
+            clientCameraImageReader?.setOnImageAvailableListener({ reader ->
+                var image: Image? = null
+                try {
+                    image = reader.acquireLatestImage()
+                    if (image != null) {
+                        val bitmap = imageYUV420ToBitmap(image)
+                        val rotatedBitmap = rotateBitmap(bitmap, 270f)  // 90도 반시계 방향 회전
+                        val flippedBitmap = flipBitmap(rotatedBitmap)   // 좌우 반전
+
+                        Handler(Looper.getMainLooper()).post {
+                            clientVideoBox.setImageBitmap(flippedBitmap)
+                            if (isVideoCallFullscreen) {
+                                clientVideoBoxFullscreen.setImageBitmap(flippedBitmap)
+                            }
+                        }
+
+                        // 원본 비트맵 해제
+                        bitmap.recycle()
+                        rotatedBitmap.recycle()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing camera image: ${e.message}")
+                } finally {
+                    image?.close()
+                }
+            }, null)
+
+
+
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    cameraDevice = camera
+                    createCameraPreviewSession()
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    cameraDevice?.close()
+                    cameraDevice = null
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera error: $error")
+                    cameraDevice?.close()
+                    cameraDevice = null
+                }
+            }, null)
+        }
+    }
+
+    private fun rotateBitmap(source: Bitmap, angle: Float): Bitmap {
+        val matrix = Matrix()
+        matrix.postRotate(angle)
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
+    private fun flipBitmap(source: Bitmap): Bitmap {
+        val matrix = Matrix()
+        matrix.preScale(-1f, 1f)
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
+    private fun createCameraPreviewSession() {
+        val surface = clientCameraImageReader?.surface
+
+        cameraDevice?.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                cameraCaptureSession = session
+                val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                captureRequest?.addTarget(surface!!)
+                cameraCaptureSession?.setRepeatingRequest(captureRequest!!.build(), null, null)
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Failed to configure camera session")
+            }
+        }, null)
+    }
+
+    private fun imageYUV420ToBitmap(image: Image): Bitmap {
+        val yBuffer = image.planes[0].buffer
+        val uBuffer = image.planes[1].buffer
+        val vBuffer = image.planes[2].buffer
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 100, out)
+        val imageBytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    }
+
 
     private fun setupFullscreenOverlay() {
         fullscreenOverlayView = LayoutInflater.from(this).inflate(R.layout.fullscreen_overlay, null)
+        clientVideoBoxFullscreen = fullscreenOverlayView.findViewById(R.id.clientVideoFullBox)
         fullscreenOverlayView.setOnClickListener {
             toggleFullscreen()
         }
@@ -1038,6 +1173,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         clientSocket?.close()
         coroutineScope.cancel()
         stopScreenSharing()
+        try {
+            cameraCaptureSession?.close()
+            cameraDevice?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing camera: ${e.message}")
+        }
+
+        clientCameraImageReader?.close()
     }
 
     private fun stopScreenSharing() {
