@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.util.Size
 import android.view.ViewGroup
@@ -191,38 +193,55 @@ class YeYaCallActivity : AppCompatActivity() {
         }
 
         private fun rotateFlipAndProcessBitmap(originalBitmap: Bitmap): Bitmap {
+            // Step 1: Rotate and flip the bitmap
             val matrix = Matrix().apply {
                 postRotate(90f)
                 postScale(-1f, 1f, originalBitmap.width / 2f, originalBitmap.height / 2f)
             }
-            var rotatedFlippedBitmap = Bitmap.createBitmap(
+            val rotatedFlippedBitmap = Bitmap.createBitmap(
                 originalBitmap, 0, 0,
                 originalBitmap.width, originalBitmap.height,
                 matrix, true
             )
 
-            // Crop to 480x480
-            val dimension = minOf(rotatedFlippedBitmap.width, rotatedFlippedBitmap.height, 480)
-            val x = (rotatedFlippedBitmap.width - dimension) / 2
-            val y = (rotatedFlippedBitmap.height - dimension) / 2
-            val croppedBitmap = Bitmap.createBitmap(rotatedFlippedBitmap, x, y, dimension, dimension)
+            // Step 2: Create a square bitmap that fits the entire image
+            val squareSize = maxOf(rotatedFlippedBitmap.width, rotatedFlippedBitmap.height)
+            val squareBitmap = Bitmap.createBitmap(squareSize, squareSize, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(squareBitmap)
+            canvas.drawColor(Color.BLACK) // Fill with black background
 
-            // Compress
+            // Calculate scaling factor to fit the image in the square
+            val scale = minOf(
+                squareSize.toFloat() / rotatedFlippedBitmap.width,
+                squareSize.toFloat() / rotatedFlippedBitmap.height
+            )
+
+            // Calculate position to center the image
+            val left = (squareSize - rotatedFlippedBitmap.width * scale) / 2f
+            val top = (squareSize - rotatedFlippedBitmap.height * scale) / 2f
+
+            // Draw the scaled image onto the square canvas
+            val scaledRect = RectF(left, top, left + rotatedFlippedBitmap.width * scale, top + rotatedFlippedBitmap.height * scale)
+            canvas.drawBitmap(rotatedFlippedBitmap, null, scaledRect, null)
+
+            // Step 3: Resize to 480x480
+            val resizedBitmap = Bitmap.createScaledBitmap(squareBitmap, 480, 480, true)
+
+            // Step 4: Compress
             val outputStream = ByteArrayOutputStream()
-            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 20, outputStream)
+            resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 20, outputStream)
             val compressedByteArray = outputStream.toByteArray()
 
             // Clean up
             if (rotatedFlippedBitmap != originalBitmap) {
                 originalBitmap.recycle()
             }
-            if (croppedBitmap != rotatedFlippedBitmap) {
-                rotatedFlippedBitmap.recycle()
-            }
+            rotatedFlippedBitmap.recycle()
+            squareBitmap.recycle()
+            resizedBitmap.recycle()
 
             return BitmapFactory.decodeByteArray(compressedByteArray, 0, compressedByteArray.size)
         }
-
     }
 
 
