@@ -174,7 +174,7 @@ class ServerService : Service() {
                     if (inputStream.read(sizeBuffer) == -1) break
                     val imageSize = ByteBuffer.wrap(sizeBuffer).int
 
-                    if (imageSize <= 0 || imageSize > 10_000_000) { // Set a reasonable max size
+                    if (imageSize <= 0 || imageSize > 10_000_000) {
                         Log.e(TAG, "Invalid image size: $imageSize")
                         continue
                     }
@@ -196,13 +196,14 @@ class ServerService : Service() {
                         intent.putExtra("imageData", imageData)
                         startService(intent)
                     } else {
-                        Log.e(TAG, "Incomplete image received")
+                        Log.e(TAG, "Incomplete image received: $totalBytesRead / $imageSize bytes")
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error in receiveScreenSharing", e)
             } finally {
                 client.close()
+                Log.d(TAG, "Client socket closed")
             }
         }
     }

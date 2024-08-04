@@ -47,6 +47,8 @@ class YeYaCallService : Service() {
             val imageData = intent.getByteArrayExtra("imageData")
             if (imageData != null) {
                 updateScreenShare(imageData)
+            } else {
+                Log.e(TAG, "Received null imageData in UPDATE_SCREEN_SHARE")
             }
         } else {
             val clientScreenWidth = intent?.getIntExtra("clientScreenWidth", 0) ?: 0

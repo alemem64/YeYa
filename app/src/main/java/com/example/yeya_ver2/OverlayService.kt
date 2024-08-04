@@ -835,7 +835,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 coroutineScope.launch {
                     sendImageToServer(compressedImageData)
                 }
-            }
+            } ?: Log.e(TAG, "Failed to acquire image from screenImageReader")
         } catch (e: Exception) {
             Log.e(TAG, "Error in captureAndSendFrame", e)
         }
@@ -864,14 +864,15 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     val outputStream = socket.getOutputStream()
                     val dataSize = imageData.size
                     outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
-                    Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
                     outputStream.write(imageData)
                     outputStream.flush()
+                    Log.d(TAG, "Image sent successfully (Size: $dataSize bytes)")
+                } else {
+                    Log.e(TAG, "Client socket is closed")
                 }
-            }
+            } ?: Log.e(TAG, "Client socket is null")
         } catch (e: Exception) {
             Log.e(TAG, "Error sending image to server", e)
-            // Implement reconnection logic here if needed
         }
     }
 
