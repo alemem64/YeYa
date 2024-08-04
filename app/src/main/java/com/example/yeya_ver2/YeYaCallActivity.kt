@@ -109,6 +109,7 @@ class YeYaCallActivity : AppCompatActivity() {
                     it.setAnalyzer(cameraExecutor, ImageAnalyzer { bitmap ->
                         runOnUiThread {
                             previewView.setImageBitmap(bitmap)
+                            onNewFrameProcessed(bitmap)
                         }
                     })
                 }
@@ -126,6 +127,12 @@ class YeYaCallActivity : AppCompatActivity() {
 
         }, ContextCompat.getMainExecutor(this))
     }
+
+    private fun onNewFrameProcessed(bitmap: Bitmap) {
+
+    }
+
+
 
     private class ImageAnalyzer(private val listener: (Bitmap) -> Unit) : ImageAnalysis.Analyzer {
         override fun analyze(image: ImageProxy) {
