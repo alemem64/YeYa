@@ -72,6 +72,8 @@ import android.hardware.camera2.*
 import android.util.Size
 import android.view.Surface
 import android.widget.ImageView
+import java.io.BufferedInputStream
+
 
 
 
@@ -127,6 +129,10 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private var clientCameraImageReader: ImageReader? = null
     private lateinit var clientVideoBox: ImageView
     private lateinit var clientVideoBoxFullscreen: ImageView
+
+    private lateinit var serverVideoBox: ImageView
+    private lateinit var serverVideoBoxFullscreen: ImageView
+    private val serverCameraImageQueue = Channel<ByteArray>(Channel.BUFFERED)
 
 
 
@@ -395,8 +401,88 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
         // 전면 카메라 설정
         clientVideoBox = videoCallOverlayView.findViewById(R.id.clientVideoBox)
+        serverVideoBox = videoCallOverlayView.findViewById(R.id.serverVideoBox)
+        serverVideoBoxFullscreen = fullscreenOverlayView.findViewById(R.id.serverVideoFullBox)
         setupFrontCamera()
-        receiveSeverCameraSharing()
+        receiveServerCameraSharing()
+    }
+
+    private fun receiveServerCameraSharing() {
+        coroutineScope.launch(Dispatchers.IO) {
+            val socket = SocketManager.getClientSocket()
+            if (socket == null || socket.isClosed) {
+                Log.e(TAG, "Socket is null or closed")
+                return@launch
+            }
+
+            val inputStream = BufferedInputStream(socket.inputStream)
+            val headerBuffer = ByteArray(20) // "SERVER_CAMERA_IMAGE".length
+            val sizeBuffer = ByteArray(4)
+
+            while (isActive) {
+                try {
+                    // Read header
+                    var bytesRead = 0
+                    while (bytesRead < 20) {
+                        val count = inputStream.read(headerBuffer, bytesRead, 20 - bytesRead)
+                        if (count == -1) break
+                        bytesRead += count
+                    }
+                    if (bytesRead != 20) break
+
+                    val header = String(headerBuffer)
+                    Log.d(TAG, "Received header: $header")
+
+                    if (header.trim() == "SERVER_CAMERA_IMAGE") {
+                        // Read image size
+                        bytesRead = 0
+                        while (bytesRead < 4) {
+                            val count = inputStream.read(sizeBuffer, bytesRead, 4 - bytesRead)
+                            if (count == -1) break
+                            bytesRead += count
+                        }
+                        if (bytesRead != 4) break
+
+                        val imageSize = ByteBuffer.wrap(sizeBuffer).int
+                        Log.d(TAG, "Image size: $imageSize")
+
+                        // Read image data
+                        val imageData = ByteArray(imageSize)
+                        bytesRead = 0
+                        while (bytesRead < imageSize) {
+                            val count = inputStream.read(imageData, bytesRead, imageSize - bytesRead)
+                            if (count == -1) break
+                            bytesRead += count
+                        }
+
+                        if (bytesRead == imageSize) {
+                            Log.d(TAG, "Image received successfully")
+                            serverCameraImageQueue.send(imageData)
+                        } else {
+                            Log.e(TAG, "Incomplete server camera image received")
+                        }
+                    } else {
+                        Log.e(TAG, "Invalid header received: $header")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error receiving server camera image", e)
+                    break
+                }
+            }
+        }
+
+        coroutineScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                val imageData = serverCameraImageQueue.receive()
+                val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+                withContext(Dispatchers.Main) {
+                    serverVideoBox.setImageBitmap(bitmap)
+                    if (isVideoCallFullscreen) {
+                        serverVideoBoxFullscreen.setImageBitmap(bitmap)
+                    }
+                }
+            }
+        }
     }
 
     private fun setupFrontCamera() {
