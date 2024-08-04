@@ -737,6 +737,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 if (!socket.isClosed) {
                     val outputStream = socket.getOutputStream()
                     val dataSize = imageData.size
+                    // Add multiplexing identifier '3' for screen sharing
+                    outputStream.write("3".toByteArray())
                     outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
                     Log.d(TAG, "Image Sent (Size: $dataSize bytes)")
                     outputStream.write(imageData)
@@ -770,7 +772,13 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 while (isActive && clientSocket?.isConnected == true) {
                     val message = reader.readLine() ?: break
                     Log.d(TAG, "Received event: $message")
-                    processEvent(message)
+
+                    when (message[0]) {
+                        '0' -> processRemoteControlEvent(message.substring(1))
+                        '2' -> processAudioEvent(message.substring(1))
+                        '4' -> processServerCameraEvent(message.substring(1))
+                        else -> Log.e(TAG, "Unknown event type: ${message[0]}")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
@@ -781,6 +789,35 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }
             }
         }
+    }
+
+    private fun processRemoteControlEvent(message: String) {
+        // Existing code to process remote control events
+        val parts = message.split("|")
+        if (parts.size != 4) {
+            Log.e(TAG, "Invalid event message: $message")
+            return
+        }
+
+        try {
+            val action = parts[1]
+            val (x, y) = parts[2].split(",").map { it.toFloat() }
+            val touchTime = parts[3].toLong()
+
+            addTouchEventToBuffer(action, x, y, touchTime)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing touch event: ${e.message}")
+        }
+    }
+
+    private fun processAudioEvent(message: String) {
+        // TODO: Implement audio event processing
+        Log.d(TAG, "Received audio event: $message")
+    }
+
+    private fun processServerCameraEvent(message: String) {
+        // TODO: Implement server camera event processing
+        Log.d(TAG, "Received server camera event: $message")
     }
 
     private var currentPath: Path? = null

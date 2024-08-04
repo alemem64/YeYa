@@ -135,12 +135,8 @@ class ServerService : Service() {
                         Log.d(TAG, "Received startYeYaCall message")
                         startYeYaCallService(client)  // Pass the client socket here
                         stopOverlayService()
-                        receiveScreenSharing(client)
+                        handleIncomingEvents(client)
 
-                        startServerSendVideoCall()
-                        startServerSendSpeakCall()
-                        startServerReceiveVideoCall()
-                        startServerReceiveSpeakCall()
                     }
                 }
             } catch (e: Exception) {
@@ -149,26 +145,59 @@ class ServerService : Service() {
         }
     }
 
-    private fun startServerSendVideoCall() {
-        Log.d(TAG, "Starting server send video call")
-        val intent = Intent(this, YeYaCallActivity::class.java).apply {
-            action = "SETUP_VIDEO_CALL_OVERLAY"
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun handleIncomingEvents(client: Socket) {
+        coroutineScope.launch(Dispatchers.IO) {
+            val inputStream = BufferedInputStream(client.inputStream)
+            val sizeBuffer = ByteArray(4)
+
+            try {
+                while (!client.isClosed) {
+                    val eventType = inputStream.read().toChar()
+                    when (eventType) {
+                        '1' -> processAudioEvent(inputStream)
+                        '3' -> receiveScreenSharing(inputStream)
+                        else -> Log.e(TAG, "Unknown event type: $eventType")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in handleIncomingEvents", e)
+            } finally {
+                client.close()
+            }
         }
-        startActivity(intent)
     }
 
-    private fun startServerSendSpeakCall() {
-        Log.d(TAG, "Starting server send speak call")
+    private fun processAudioEvent(inputStream: BufferedInputStream) {
+        // TODO: Implement audio event processing
+        Log.d(TAG, "Received audio event")
     }
 
-    private fun startServerReceiveVideoCall() {
-        Log.d(TAG, "Starting server receive video call")
+    private fun receiveScreenSharing(inputStream: BufferedInputStream) {
+        val sizeBuffer = ByteArray(4)
+        inputStream.read(sizeBuffer)
+        val imageSize = ByteBuffer.wrap(sizeBuffer).int
+
+        val imageData = ByteArray(imageSize)
+        var totalBytesRead = 0
+        while (totalBytesRead < imageSize) {
+            val bytesRead = inputStream.read(imageData, totalBytesRead, imageSize - totalBytesRead)
+            if (bytesRead == -1) break
+            totalBytesRead += bytesRead
+        }
+
+        if (totalBytesRead == imageSize) {
+            Log.d(TAG, "Image Received (Size: $imageSize bytes)")
+            // Update image in YeYaCallService
+            val intent = Intent(this@ServerService, YeYaCallService::class.java)
+            intent.action = "UPDATE_SCREEN_SHARE"
+            intent.putExtra("imageData", imageData)
+            startService(intent)
+        } else {
+            Log.e(TAG, "Incomplete image received")
+        }
     }
 
-    private fun startServerReceiveSpeakCall() {
-        Log.d(TAG, "Starting server receive speak call")
-    }
+
 
     private fun startYeYaCallService(client: Socket) {
         SocketManager.setClientSocket(client)
@@ -184,44 +213,7 @@ class ServerService : Service() {
         stopService(intent)
     }
 
-    private fun receiveScreenSharing(client: Socket) {
-        coroutineScope.launch(Dispatchers.IO) {
-            val inputStream = BufferedInputStream(client.inputStream)
-            val sizeBuffer = ByteArray(4)
 
-            try {
-                while (!client.isClosed) {
-                    // Read image size
-                    if (inputStream.read(sizeBuffer) == -1) break
-                    val imageSize = ByteBuffer.wrap(sizeBuffer).int
-
-                    // Read image data
-                    val imageData = ByteArray(imageSize)
-                    var totalBytesRead = 0
-                    while (totalBytesRead < imageSize) {
-                        val bytesRead = inputStream.read(imageData, totalBytesRead, imageSize - totalBytesRead)
-                        if (bytesRead == -1) break
-                        totalBytesRead += bytesRead
-                    }
-
-                    if (totalBytesRead == imageSize) {
-                        Log.d(TAG, "Image Received (Size: $imageSize bytes)")
-                        // Update image in YeYaCallService
-                        val intent = Intent(this@ServerService, YeYaCallService::class.java)
-                        intent.action = "UPDATE_SCREEN_SHARE"
-                        intent.putExtra("imageData", imageData)
-                        startService(intent)
-                    } else {
-                        Log.e(TAG, "Incomplete image received")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in receiveScreenSharing", e)
-            } finally {
-                client.close()
-            }
-        }
-    }
 
     private fun getIPAddress(): String {
         try {

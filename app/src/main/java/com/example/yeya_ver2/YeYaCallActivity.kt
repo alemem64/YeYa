@@ -139,12 +139,16 @@ class YeYaCallActivity : AppCompatActivity() {
         }
     }
 
+// In YeYaCallActivity.kt
+
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     socketOutputStream?.let { outputStream ->
-                        outputStream.write(("TOUCH|$message\n").toByteArray())
+                        // Add multiplexing identifier '0' for remote control
+                        val multiplexedMessage = "0${message.length}|$message\n"
+                        outputStream.write(multiplexedMessage.toByteArray())
                         outputStream.flush()
                     } ?: Log.e("YeYaCallActivity", "OutputStream is null")
                 }
