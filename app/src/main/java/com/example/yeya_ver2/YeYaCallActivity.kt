@@ -170,6 +170,7 @@ class YeYaCallActivity : AppCompatActivity() {
         val scaledBitmap = Bitmap.createScaledBitmap(croppedBitmap, 480, 480, true)
         croppedBitmap.recycle()
         bitmap.recycle()
+        Log.d(TAG, "Cropped Bitmap To Square")
         return scaledBitmap
     }
 
