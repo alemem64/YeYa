@@ -137,10 +137,14 @@ class ServerService : Service() {
                         stopOverlayService()
                         receiveScreenSharing(client)
 
-                        startServerSendVideoCall()
-                        startServerSendSpeakCall()
-                        startServerReceiveVideoCall()
-                        startServerReceiveSpeakCall()
+
+
+                        startSeverCameraSharing()
+
+
+
+
+
                     }
                 }
             } catch (e: Exception) {
@@ -149,26 +153,7 @@ class ServerService : Service() {
         }
     }
 
-    private fun startServerSendVideoCall() {
-        Log.d(TAG, "Starting server send video call")
-        val intent = Intent(this, YeYaCallActivity::class.java).apply {
-            action = "SETUP_VIDEO_CALL_OVERLAY"
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
-    }
 
-    private fun startServerSendSpeakCall() {
-        Log.d(TAG, "Starting server send speak call")
-    }
-
-    private fun startServerReceiveVideoCall() {
-        Log.d(TAG, "Starting server receive video call")
-    }
-
-    private fun startServerReceiveSpeakCall() {
-        Log.d(TAG, "Starting server receive speak call")
-    }
 
     private fun startYeYaCallService(client: Socket) {
         SocketManager.setClientSocket(client)

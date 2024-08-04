@@ -358,6 +358,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
 
 
+
+
                 } else {
                     Log.e(TAG, "Unexpected response from server: $response")
                     clientSocket?.close()
@@ -394,6 +396,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         // 전면 카메라 설정
         clientVideoBox = videoCallOverlayView.findViewById(R.id.clientVideoBox)
         setupFrontCamera()
+        receiveSeverCameraSharing()
     }
 
     private fun setupFrontCamera() {
