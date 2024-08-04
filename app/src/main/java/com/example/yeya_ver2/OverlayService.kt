@@ -839,19 +839,23 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun processRemoteControlEvent(message: String) {
-        // Existing code to process remote control events
         val parts = message.split("|")
-        if (parts.size != 4) {
-            Log.e(TAG, "Invalid event message: $message")
+        if (parts.size != 3) {
+            Log.e(TAG, "Invalid event message format: $message")
             return
         }
 
         try {
-            val action = parts[1]
-            val (x, y) = parts[2].split(",").map { it.toFloat() }
-            val touchTime = parts[3].toLong()
+            val action = parts[0]
+            val (x, y) = parts[1].split(",").map { it.toFloat() }
+            val touchTime = parts[2].toLong()
 
-            addTouchEventToBuffer(action, x, y, touchTime)
+            when (action) {
+                "DOWN" -> startGesture(x, y, touchTime)
+                "MOVE" -> updateGesture(x, y, touchTime)
+                "UP" -> endGesture(x, y, touchTime)
+                else -> Log.e(TAG, "Unknown action: $action")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing touch event: ${e.message}")
         }
@@ -916,10 +920,14 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         gestureStartTime = touchTime
         currentPath = Path().apply { moveTo(x, y) }
         gestureBuilder = GestureDescription.Builder()
+        lastX = x
+        lastY = y
     }
 
     private fun updateGesture(x: Float, y: Float, touchTime: Long) {
         currentPath?.lineTo(x, y)
+        lastX = x
+        lastY = y
     }
 
     private fun endGesture(x: Float, y: Float, touchTime: Long) {
