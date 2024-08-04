@@ -245,14 +245,11 @@ class ServerService : Service() {
                 val socket = SocketManager.getClientSocket()
                 if (socket != null && !socket.isClosed) {
                     val outputStream = socket.getOutputStream()
-                    Log.d(TAG, "Sending SERVER_CAMERA_IMAGE header")
-                    outputStream.write("SERVER_CAMERA_IMAGE".toByteArray())
-                    Log.d(TAG, "Sending image size: ${imageData.size}")
+                    outputStream.write(ByteBuffer.allocate(4).putInt(1).array()) // 데이터 타입 (1: 서버 카메라 이미지)
                     outputStream.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
-                    Log.d(TAG, "Sending image data")
                     outputStream.write(imageData)
                     outputStream.flush()
-                    Log.d(TAG, "Image data sent successfully")
+                    Log.d(TAG, "Server camera image sent: ${imageData.size} bytes")
                 } else {
                     Log.e(TAG, "Socket is null or closed")
                 }

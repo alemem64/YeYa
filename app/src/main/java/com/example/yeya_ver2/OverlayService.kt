@@ -73,8 +73,7 @@ import android.util.Size
 import android.view.Surface
 import android.widget.ImageView
 import java.io.BufferedInputStream
-
-
+import java.io.InputStream
 
 
 class OverlayService : Service(), TextToSpeech.OnInitListener {
@@ -416,56 +415,38 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
 
             val inputStream = BufferedInputStream(socket.inputStream)
-            val headerBuffer = ByteArray(20) // "SERVER_CAMERA_IMAGE".length
-            val sizeBuffer = ByteArray(4)
+            val headerBuffer = ByteArray(4)  // 4바이트 정수로 데이터 타입 구분
 
             while (isActive) {
                 try {
-                    // Read header
-                    var bytesRead = 0
-                    while (bytesRead < 20) {
-                        val count = inputStream.read(headerBuffer, bytesRead, 20 - bytesRead)
-                        if (count == -1) break
-                        bytesRead += count
-                    }
-                    if (bytesRead != 20) break
+                    // 데이터 타입 읽기
+                    if (!readFully(inputStream, headerBuffer, 4)) break
+                    val dataType = ByteBuffer.wrap(headerBuffer).int
 
-                    val header = String(headerBuffer)
-                    Log.d(TAG, "Received header: $header")
+                    // 데이터 크기 읽기
+                    if (!readFully(inputStream, headerBuffer, 4)) break
+                    val dataSize = ByteBuffer.wrap(headerBuffer).int
 
-                    if (header.trim() == "SERVER_CAMERA_IMAGE") {
-                        // Read image size
-                        bytesRead = 0
-                        while (bytesRead < 4) {
-                            val count = inputStream.read(sizeBuffer, bytesRead, 4 - bytesRead)
-                            if (count == -1) break
-                            bytesRead += count
-                        }
-                        if (bytesRead != 4) break
-
-                        val imageSize = ByteBuffer.wrap(sizeBuffer).int
-                        Log.d(TAG, "Image size: $imageSize")
-
-                        // Read image data
-                        val imageData = ByteArray(imageSize)
-                        bytesRead = 0
-                        while (bytesRead < imageSize) {
-                            val count = inputStream.read(imageData, bytesRead, imageSize - bytesRead)
-                            if (count == -1) break
-                            bytesRead += count
-                        }
-
-                        if (bytesRead == imageSize) {
-                            Log.d(TAG, "Image received successfully")
+                    when (dataType) {
+                        1 -> { // 서버 카메라 이미지
+                            val imageData = ByteArray(dataSize)
+                            if (!readFully(inputStream, imageData, dataSize)) break
+                            Log.d(TAG, "Received server camera image: $dataSize bytes")
                             serverCameraImageQueue.send(imageData)
-                        } else {
-                            Log.e(TAG, "Incomplete server camera image received")
                         }
-                    } else {
-                        Log.e(TAG, "Invalid header received: $header")
+                        2 -> { // 화면 공유 데이터
+                            val screenData = ByteArray(dataSize)
+                            if (!readFully(inputStream, screenData, dataSize)) break
+                            Log.d(TAG, "Received screen share data: $dataSize bytes")
+                            // 화면 공유 데이터 처리 로직
+                        }
+                        else -> {
+                            Log.e(TAG, "Unknown data type: $dataType")
+                            break
+                        }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error receiving server camera image", e)
+                    Log.e(TAG, "Error receiving data", e)
                     break
                 }
             }
@@ -483,6 +464,16 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }
             }
         }
+    }
+
+    private fun readFully(inputStream: InputStream, buffer: ByteArray, length: Int): Boolean {
+        var bytesRead = 0
+        while (bytesRead < length) {
+            val count = inputStream.read(buffer, bytesRead, length - bytesRead)
+            if (count == -1) return false
+            bytesRead += count
+        }
+        return true
     }
 
     private fun setupFrontCamera() {
