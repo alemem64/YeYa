@@ -780,25 +780,24 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-                while (isActive && clientSocket?.isConnected == true) {
-                    val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received event: $message")
+                SocketManager.getInputStream()?.let { inputStream ->
+                    val reader = BufferedReader(InputStreamReader(inputStream))
+                    while (isActive) {
+                        val message = reader.readLine() ?: break
+                        Log.d(TAG, "Received event: $message")
 
-                    when (message[0]) {
-                        '0' -> processRemoteControlEvent(message.substring(1))
-                        '2' -> processAudioEvent(message.substring(1))
-                        '4' -> processServerCameraEvent(message.substring(1))
-                        else -> Log.e(TAG, "Unknown event type: ${message[0]}")
+                        when (message[0]) {
+                            '0' -> processRemoteControlEvent(message.substring(1))
+                            '2' -> processAudioEvent(message.substring(1))
+                            '4' -> processServerCameraEvent(message.substring(1))
+                            else -> Log.e(TAG, "Unknown event type: ${message[0]}")
+                        }
                     }
+                } ?: run {
+                    Log.e(TAG, "InputStream is null")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
-            } finally {
-                // Handle disconnection
-                withContext(Dispatchers.Main) {
-                    // Update UI or handle reconnection
-                }
             }
         }
     }

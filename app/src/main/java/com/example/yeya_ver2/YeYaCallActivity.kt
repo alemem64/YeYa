@@ -101,7 +101,12 @@ class YeYaCallActivity : AppCompatActivity() {
         }
 
         if (cameraId != null) {
-            imageReader = ImageReader.newInstance(480, 480, ImageFormat.JPEG, 2)
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val streamConfigurationMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val sizes = streamConfigurationMap?.getOutputSizes(ImageFormat.JPEG)
+            val size = sizes?.firstOrNull { it.width >= 480 && it.height >= 480 } ?: Size(640, 480)
+
+            imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
             imageReader.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
                 image?.let {
@@ -186,12 +191,17 @@ class YeYaCallActivity : AppCompatActivity() {
                     outputStream.write(imageData)
                     outputStream.flush()
                     Log.d(TAG, "Server camera image sent (Size: $dataSize bytes)")
+                } else {
+                    Log.e(TAG, "Socket is closed. Attempting to reconnect...")
+                    reconnectToClient()
                 }
             } ?: run {
-                Log.e(TAG, "Client socket is null")
+                Log.e(TAG, "Client socket is null. Attempting to reconnect...")
+                reconnectToClient()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error sending server camera image to client", e)
+            reconnectToClient()
         }
     }
 
@@ -283,16 +293,15 @@ class YeYaCallActivity : AppCompatActivity() {
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    socketOutputStream?.let { outputStream ->
-                        // Add multiplexing identifier '0' for remote control
+                    SocketManager.getOutputStream()?.let { outputStream ->
                         val multiplexedMessage = "0${message.length}|$message\n"
                         outputStream.write(multiplexedMessage.toByteArray())
                         outputStream.flush()
-                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
+                        Log.d(TAG, "Sent touch event: $multiplexedMessage")
+                    } ?: Log.e(TAG, "OutputStream is null")
                 }
             } catch (e: Exception) {
-                Log.e("YeYaCallActivity", "Error sending touch event to client", e)
-                reconnectToClient()
+                Log.e(TAG, "Error sending touch event to client", e)
             }
         }
     }
@@ -328,6 +337,7 @@ class YeYaCallActivity : AppCompatActivity() {
                     val intent = Intent(this@YeYaCallActivity, ServerService::class.java)
                     intent.action = "RECONNECT_CLIENT"
                     startService(intent)
+
 
                     // Wait for the reconnection attempt
                     delay(reconnectDelay)

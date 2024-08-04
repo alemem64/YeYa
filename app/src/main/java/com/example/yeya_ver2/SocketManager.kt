@@ -1,3 +1,5 @@
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.Socket
 
 object SocketManager {
@@ -7,7 +9,20 @@ object SocketManager {
         clientSocket = socket
     }
 
-    fun getClientSocket(): Socket? = clientSocket
+    fun getClientSocket(): Socket? {
+        return clientSocket
+    }
 
-    fun getOutputStream() = clientSocket?.getOutputStream()
+    fun getOutputStream(): OutputStream? {
+        return clientSocket?.getOutputStream()
+    }
+
+    fun getInputStream(): InputStream? {
+        return clientSocket?.getInputStream()
+    }
+
+    fun closeSocket() {
+        clientSocket?.close()
+        clientSocket = null
+    }
 }
