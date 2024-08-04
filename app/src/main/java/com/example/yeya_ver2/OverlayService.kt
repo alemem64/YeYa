@@ -855,27 +855,20 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             try {
                 val socket = SocketManager.getClientSocket()
                 val inputStream = BufferedInputStream(socket?.inputStream)
-                val headerBuffer = ByteArray(12)  // "CAMERA_IMAGE" 또는 "TOUCH_EVENT" 길이
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
+                val reader = BufferedReader(InputStreamReader(inputStream))
 
                 while (isActive && socket?.isConnected == true) {
-                    // 헤더 읽기
-                    if (!readFully(inputStream, headerBuffer, 12)) break
-                    val header = String(headerBuffer)
-
+                    val line = reader.readLine() ?: break
                     when {
-                        header == "CAMERA_IMAGE" -> {
-                            // 카메라 이미지 처리
+                        line.startsWith("TOUCH_EVENT ") -> {
+                            val eventData = line.substringAfter("TOUCH_EVENT ")
+                            Log.d(TAG, "Received touch event: $eventData")
+                            processEvent(eventData)
+                        }
+                        line.startsWith("CAMERA_IMAGE") -> {
                             handleCameraImage(inputStream)
                         }
-                        header == "TOUCH_EVENT" -> {
-                            // 터치 이벤트 처리 (기존 로직)
-                            val message = reader.readLine() ?: break
-                            processEvent(message)
-                        }
-                        else -> {
-                            Log.e(TAG, "Unknown header: $header")
-                        }
+                        else -> Log.e(TAG, "Unknown event: $line")
                     }
                 }
             } catch (e: Exception) {
@@ -884,16 +877,18 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private suspend fun handleCameraImage(inputStream: InputStream) {
+    private fun handleCameraImage(inputStream: InputStream) {
+        // 이미지 크기 읽기
         val sizeBuffer = ByteArray(4)
         if (!readFully(inputStream, sizeBuffer, 4)) return
         val imageSize = ByteBuffer.wrap(sizeBuffer).int
 
+        // 이미지 데이터 읽기
         val imageData = ByteArray(imageSize)
         if (!readFully(inputStream, imageData, imageSize)) return
 
         Log.d(TAG, "Received server camera image: $imageSize bytes")
-        serverCameraImageQueue.send(imageData)
+        serverCameraImageQueue.trySend(imageData)
     }
 
 

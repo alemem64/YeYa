@@ -21,6 +21,7 @@ import kotlinx.coroutines.*
 
 
 class YeYaCallActivity : AppCompatActivity() {
+    private val TAG = "YeYaCallActivity"
     private lateinit var screenShareImageView: ImageView
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
@@ -143,14 +144,16 @@ class YeYaCallActivity : AppCompatActivity() {
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    socketOutputStream?.let { outputStream ->
-                        outputStream.write(("TOUCH|$message\n").toByteArray())
+                    SocketManager.getOutputStream()?.let { outputStream ->
+                        outputStream.write("TOUCH_EVENT ".toByteArray())
+                        outputStream.write(message.toByteArray())
+                        outputStream.write('\n'.toInt())
                         outputStream.flush()
-                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
+                        Log.d(TAG, "Touch Event Sent to client: $message")
+                    } ?: Log.e(TAG, "OutputStream is null")
                 }
             } catch (e: Exception) {
-                Log.e("YeYaCallActivity", "Error sending touch event to client", e)
-                reconnectToClient()
+                Log.e(TAG, "Error sending touch event to client", e)
             }
         }
     }
