@@ -787,6 +787,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                         Log.d(TAG, "Received event: $message")
 
                         when (message[0]) {
+
                             '0' -> processRemoteControlEvent(message.substring(1))
                             '2' -> processAudioEvent(message.substring(1))
                             '4' -> processServerCameraEvent(message.substring(1))

@@ -36,8 +36,8 @@ import android.graphics.Matrix
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.channels.Channel
 import java.io.ByteArrayOutputStream
-
-
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Executors
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -46,7 +46,7 @@ class YeYaCallActivity : AppCompatActivity() {
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
     private var socketOutputStream: OutputStream? = null
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + Job())
+    private val coroutineScope = CoroutineScope(Dispatchers.Default + Job())
     private var isReconnecting = false
     private val reconnectDelay = 5000L // 5 seconds
 
@@ -64,6 +64,10 @@ class YeYaCallActivity : AppCompatActivity() {
     private lateinit var imageReader: ImageReader
     private val cameraHandler = Handler(HandlerThread("CameraThread").apply { start() }.looper)
     private val serverCameraQueue = Channel<ByteArray>(Channel.BUFFERED)
+
+
+
+
 
 
 
@@ -94,7 +98,6 @@ class YeYaCallActivity : AppCompatActivity() {
             Log.e(TAG, "Camera permission not granted")
             return
         }
-
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraId = cameraManager.cameraIdList.find {
             cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
@@ -104,14 +107,17 @@ class YeYaCallActivity : AppCompatActivity() {
             val characteristics = cameraManager.getCameraCharacteristics(cameraId)
             val streamConfigurationMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             val sizes = streamConfigurationMap?.getOutputSizes(ImageFormat.JPEG)
-            val size = sizes?.firstOrNull { it.width >= 480 && it.height >= 480 } ?: Size(640, 480)
+            val size = sizes?.firstOrNull { it.width <= 1280 && it.height <= 720 } ?: Size(640, 480)
+
+            Log.d(TAG, "Selected camera size: ${size.width}x${size.height}")
 
             imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
             imageReader.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
                 image?.let {
+                    Log.d(TAG, "Acquired image format: ${it.format}")
                     val buffer = it.planes[0].buffer
-                    val bytes = ByteArray(buffer.capacity())
+                    val bytes = ByteArray(buffer.remaining())
                     buffer.get(bytes)
                     coroutineScope.launch {
                         processAndEnqueueImage(bytes)
@@ -153,15 +159,27 @@ class YeYaCallActivity : AppCompatActivity() {
         }, cameraHandler)
     }
 
-    private suspend fun processAndEnqueueImage(imageBytes: ByteArray) {
-        withContext(Dispatchers.Default) {
-            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            val croppedBitmap = cropBitmapToSquare(bitmap)
-            val outputStream = ByteArrayOutputStream()
-            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
-            val compressedBytes = outputStream.toByteArray()
-            serverCameraQueue.send(compressedBytes)
-            sendServerCameraImageToClient()
+    private val imageProcessingExecutor = Executors.newFixedThreadPool(2)
+    private val imageBuffer = ArrayBlockingQueue<ByteArray>(10)
+
+    private fun processAndEnqueueImage(imageBytes: ByteArray) {
+        imageProcessingExecutor.execute {
+            try {
+                val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                val croppedBitmap = cropBitmapToSquare(bitmap)
+                val outputStream = ByteArrayOutputStream()
+                croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+                val compressedBytes = outputStream.toByteArray()
+
+                imageBuffer.offer(compressedBytes)
+                if (imageBuffer.size == imageBuffer.capacity) {
+                    imageBuffer.poll()
+                }
+
+                sendServerCameraImageToClient()
+            } catch (e: OutOfMemoryError) {
+                Log.e(TAG, "OutOfMemoryError while processing image", e)
+            }
         }
     }
 
@@ -249,16 +267,19 @@ class YeYaCallActivity : AppCompatActivity() {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 isTracking = true
+                Log.d(TAG, "Touch DOWN event: x=$touchX, y=$touchY")
                 touchPath.moveTo(touchX.toFloat(), touchY.toFloat())
                 sendTouchEventToClient("DOWN|$touchX,$touchY|$touchTime")
             }
             MotionEvent.ACTION_MOVE -> {
+                Log.d(TAG, "Touch MOVE event: x=$touchX, y=$touchY")
                 if (isTracking) {
                     touchPath.lineTo(touchX.toFloat(), touchY.toFloat())
                     sendTouchEventToClient("MOVE|$touchX,$touchY|$touchTime")
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                Log.d(TAG, "Touch UP event: x=$touchX, y=$touchY")
                 isTracking = false
                 sendTouchEventToClient("UP|$touchX,$touchY|$touchTime")
                 touchPath.reset()
