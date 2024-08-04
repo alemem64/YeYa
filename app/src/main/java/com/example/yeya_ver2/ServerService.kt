@@ -3,6 +3,7 @@ package com.example.yeya_ver2
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.*
 import android.util.Log
@@ -25,6 +26,17 @@ import java.io.BufferedInputStream
 import java.net.BindException
 import java.net.InetAddress
 import java.nio.ByteBuffer
+import android.graphics.ImageFormat
+import android.hardware.camera2.*
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Size
+import android.view.Surface
+import androidx.core.content.ContextCompat
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.channels.Channel
+import android.Manifest
 
 class ServerService : Service() {
     private val TAG = "SeverService"
@@ -35,6 +47,13 @@ class ServerService : Service() {
     private val networkCoroutineScope = CoroutineScope(Dispatchers.IO + Job())
     private var clientScreenWidth: Int = 0
     private var clientScreenHeight: Int = 0
+    private lateinit var cameraManager: CameraManager
+    private var cameraDevice: CameraDevice? = null
+    private var cameraCaptureSession: CameraCaptureSession? = null
+    private var serverCameraImageReader: ImageReader? = null
+    private val cameraHandler = Handler(HandlerThread("CameraThread").apply { start() }.looper)
+    private val serverCameraImageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private var isServerCameraRecording = false
 
 
     override fun onCreate() {
@@ -139,7 +158,8 @@ class ServerService : Service() {
 
 
 
-                        startSeverCameraSharing()
+                        startServerCameraSharing()
+
 
 
 
@@ -152,6 +172,92 @@ class ServerService : Service() {
             }
         }
     }
+
+    private fun startServerCameraSharing() {
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        setupServerCamera()
+    }
+
+    private fun setupServerCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Camera permission not granted")
+            return
+        }
+        val cameraId = cameraManager.cameraIdList.find {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        } ?: throw RuntimeException("Front camera not found")
+
+        serverCameraImageReader = ImageReader.newInstance(480, 480, ImageFormat.YUV_420_888, 2)
+        serverCameraImageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage()
+            if (image != null) {
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                serverCameraImageQueue.trySend(bytes)
+                image.close()
+            }
+        }, cameraHandler)
+
+        cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+            override fun onOpened(camera: CameraDevice) {
+                cameraDevice = camera
+                createCameraCaptureSession()
+            }
+            override fun onDisconnected(camera: CameraDevice) {
+                cameraDevice?.close()
+            }
+            override fun onError(camera: CameraDevice, error: Int) {
+                Log.e(TAG, "Camera error: $error")
+            }
+        }, cameraHandler)
+    }
+
+    private fun createCameraCaptureSession() {
+        val surface = serverCameraImageReader?.surface
+        cameraDevice?.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                cameraCaptureSession = session
+                val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                captureRequest?.addTarget(surface!!)
+                cameraCaptureSession?.setRepeatingRequest(captureRequest!!.build(), null, cameraHandler)
+                isServerCameraRecording = true
+                launchServerCameraImageProducer()
+            }
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Failed to configure camera session")
+            }
+        }, cameraHandler)
+    }
+
+    private fun launchServerCameraImageProducer() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (isServerCameraRecording) {
+                val imageData = serverCameraImageQueue.receive()
+                sendServerCameraImageToClient(imageData)
+            }
+        }
+    }
+
+    private suspend fun sendServerCameraImageToClient(imageData: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                val socket = SocketManager.getClientSocket()
+                if (socket != null && !socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    outputStream.write("SERVER_CAMERA_IMAGE".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
+                    outputStream.write(imageData)
+                    outputStream.flush()
+                } else {
+                    Log.e(TAG, "Socket is null or closed")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending server camera image to client", e)
+            }
+        }
+    }
+
 
 
 
