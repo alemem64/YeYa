@@ -58,6 +58,7 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var previewView: ImageView
+    private val touchEventQueue = Channel<String>(Channel.BUFFERED)
 
 
 
@@ -94,6 +95,7 @@ class YeYaCallActivity : AppCompatActivity() {
 
         setUpServerCamera()
         startImageSending()
+        startTouchEventSending()
 
         Log.d(TAG, "YeYaCallActivity onCreate completed")
     }
@@ -293,18 +295,31 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
+            touchEventQueue.send(message)
+        }
+    }
+
+    private fun startTouchEventSending() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val message = touchEventQueue.receive()
                     socketOutputStream?.let { outputStream ->
-                        // Add multiplexing identifier '0' for remote control
-                        val multiplexedMessage = "0${message.length}|$message\n"
-                        outputStream.write(multiplexedMessage.toByteArray())
-                        outputStream.flush()
-                    } ?: Log.e("YeYaCallActivity", "OutputStream is null")
+                        withContext(Dispatchers.IO) {
+                            // Add multiplexing identifier '0' for remote control
+                            outputStream.write("0".toByteArray())
+                            val messageBytes = message.toByteArray(Charsets.UTF_8)
+                            val sizeBytes = ByteBuffer.allocate(4).putInt(messageBytes.size).array()
+                            outputStream.write(sizeBytes)
+                            outputStream.write(messageBytes)
+                            outputStream.flush()
+                            Log.d(TAG, "Sent touch event: $message")
+                        }
+                    } ?: Log.e(TAG, "SocketOutputStream is null")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending touch event to client", e)
+                    reconnectToClient()
                 }
-            } catch (e: Exception) {
-                Log.e("YeYaCallActivity", "Error sending touch event to client", e)
-                reconnectToClient()
             }
         }
     }

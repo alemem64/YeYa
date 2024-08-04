@@ -25,6 +25,8 @@ import java.io.BufferedInputStream
 import java.net.BindException
 import java.net.InetAddress
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
 
 class ServerService : Service() {
     private val TAG = "SeverService"
@@ -152,14 +154,16 @@ class ServerService : Service() {
             try {
                 while (!client.isClosed) {
                     val eventType = inputStream.read().toChar()
-                    Log.d(TAG, "Received event type: $eventType")
                     when (eventType) {
-                        '0' -> processRemoteControlEvent(inputStream)
-                        '1' -> processAudioEvent(inputStream)
-                        '2' -> processServerAudioEvent(inputStream)
                         '3' -> receiveScreenSharing(inputStream)
-                        '4' -> processServerCameraEvent(inputStream)
-                        else -> Log.e(TAG, "Unknown event type: $eventType")
+                        else -> {
+                            // Skip unknown event types
+                            val sizeBuffer = ByteArray(4)
+                            inputStream.read(sizeBuffer)
+                            val dataSize = ByteBuffer.wrap(sizeBuffer).order(ByteOrder.BIG_ENDIAN).int
+                            inputStream.skip(dataSize.toLong())
+                            Log.w(TAG, "Skipped unknown event type: $eventType, size: $dataSize")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -171,20 +175,9 @@ class ServerService : Service() {
         }
     }
 
-    private fun processRemoteControlEvent(inputStream: BufferedInputStream) {
-        // Implement remote control event processing
-        Log.d(TAG, "Processing remote control event")
-    }
 
-    private fun processServerAudioEvent(inputStream: BufferedInputStream) {
-        // Implement server audio event processing
-        Log.d(TAG, "Processing server audio event")
-    }
 
-    private fun processServerCameraEvent(inputStream: BufferedInputStream) {
-        // Implement server camera event processing
-        Log.d(TAG, "Processing server camera event")
-    }
+
 
 
 
@@ -196,7 +189,7 @@ class ServerService : Service() {
     private fun receiveScreenSharing(inputStream: BufferedInputStream) {
         val sizeBuffer = ByteArray(4)
         inputStream.read(sizeBuffer)
-        val imageSize = ByteBuffer.wrap(sizeBuffer).int
+        val imageSize = ByteBuffer.wrap(sizeBuffer).order(ByteOrder.BIG_ENDIAN).int
 
         val imageData = ByteArray(imageSize)
         var totalBytesRead = 0
