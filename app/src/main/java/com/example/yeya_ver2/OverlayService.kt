@@ -766,20 +766,57 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
+                val inputStream = clientSocket?.inputStream ?: return@launch
+                val buffer = ByteArray(1024)
+                var frameBuffer = ByteBuffer.allocate(0)
+
                 while (isActive && clientSocket?.isConnected == true) {
-                    val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received event: $message")
-                    processEvent(message)
+                    val bytesRead = inputStream.read(buffer)
+                    if (bytesRead == -1) break
+
+                    frameBuffer = processIncomingData(frameBuffer, buffer.copyOf(bytesRead))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
-            } finally {
-                // Handle disconnection
-                withContext(Dispatchers.Main) {
-                    // Update UI or handle reconnection
+            }
+        }
+    }
+
+    private fun processIncomingData(frameBuffer: ByteBuffer, newData: ByteArray): ByteBuffer {
+        var currentBuffer = frameBuffer.put(newData)
+        while (currentBuffer.position() >= 7) { // Minimum frame size
+            currentBuffer.flip()
+            if (currentBuffer.get() == YeYaCallActivity.FRAME_START_MARKER) {
+                val channelId = currentBuffer.get().toInt()
+                val dataLength = currentBuffer.getInt()
+                if (currentBuffer.remaining() >= dataLength + 1) { // +1 for end marker
+                    val data = ByteArray(dataLength)
+                    currentBuffer.get(data)
+                    if (currentBuffer.get() == YeYaCallActivity.FRAME_END_MARKER) {
+                        processFrame(channelId, data)
+                    }
+                    currentBuffer = currentBuffer.compact()
+                } else {
+                    currentBuffer.position(currentBuffer.position() - 6)
+                    break
+                }
+            } else {
+                currentBuffer = currentBuffer.compact()
+            }
+        }
+        return currentBuffer
+    }
+
+    private fun processFrame(channelId: Int, data: ByteArray) {
+        when (channelId) {
+            YeYaCallActivity.CHANNEL_REMOTE_CONTROL -> {
+                val message = String(data)
+                if (message.startsWith("TOUCH|")) {
+                    val touchEvent = message.substringAfter("TOUCH|")
+                    processEvent(touchEvent)
                 }
             }
+            // 다른 채널 처리 로직 추가 예정
         }
     }
 

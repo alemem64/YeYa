@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.ImageView
+import com.example.yeya_ver2.YeYaCallService.Companion.instance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
+import java.nio.ByteBuffer
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -31,6 +33,9 @@ class YeYaCallActivity : AppCompatActivity() {
 
     companion object {
         var instance: YeYaCallActivity? = null
+        const val CHANNEL_REMOTE_CONTROL = 1
+        const val FRAME_START_MARKER = 0xAA.toByte()
+        const val FRAME_END_MARKER = 0xBB.toByte()
     }
 
     private lateinit var videoCallOverlayView: View
@@ -139,12 +144,25 @@ class YeYaCallActivity : AppCompatActivity() {
         }
     }
 
+    private fun createFrame(channelId: Int, data: ByteArray): ByteArray {
+        val frameLength = 1 + 1 + 4 + data.size + 1 // Start marker + Channel ID + Data length + Data + End marker
+        return ByteBuffer.allocate(frameLength).apply {
+            put(FRAME_START_MARKER)
+            put(channelId.toByte())
+            putInt(data.size)
+            put(data)
+            put(FRAME_END_MARKER)
+        }.array()
+    }
+
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     socketOutputStream?.let { outputStream ->
-                        outputStream.write(("TOUCH|$message\n").toByteArray())
+                        val touchData = ("TOUCH|$message").toByteArray()
+                        val frame = createFrame(CHANNEL_REMOTE_CONTROL, touchData)
+                        outputStream.write(frame)
                         outputStream.flush()
                     } ?: Log.e("YeYaCallActivity", "OutputStream is null")
                 }
