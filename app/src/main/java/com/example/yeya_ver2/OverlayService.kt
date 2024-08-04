@@ -72,6 +72,8 @@ import android.hardware.camera2.*
 import android.util.Size
 import android.view.Surface
 import android.widget.ImageView
+import java.io.IOException
+import java.io.InputStream
 import java.nio.ByteOrder
 
 
@@ -786,17 +788,21 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 while (isActive && clientSocket?.isConnected == true) {
                     val identifier = inputStream.read().toChar()
                     when (identifier) {
-                        '0' -> processRemoteControlEvent(inputStream.readBytes().toString(Charsets.UTF_8))
-                        '2' -> processAudioEvent(inputStream.readBytes().toString(Charsets.UTF_8))
+                        '0' -> processRemoteControlEvent(readMessage(inputStream))
+                        '2' -> processAudioEvent(readMessage(inputStream))
                         '4' -> {
-                            val sizeBytes = ByteArray(4)
-                            inputStream.read(sizeBytes)
-                            val size = ByteBuffer.wrap(sizeBytes).order(ByteOrder.BIG_ENDIAN).int
-                            val imageData = ByteArray(size)
-                            inputStream.read(imageData)
+                            val imageSize = readInt(inputStream)
+                            val imageData = readBytes(inputStream, imageSize)
                             processServerCameraEvent(imageData)
                         }
-                        else -> Log.e(TAG, "Unknown event type: $identifier")
+                        else -> {
+                            if (identifier.toInt() != -1) {
+                                Log.e(TAG, "Unknown event type: $identifier")
+                            } else {
+                                Log.e(TAG, "End of stream reached")
+                                break
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -807,6 +813,29 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 }
             }
         }
+    }
+
+    private suspend fun readMessage(inputStream: InputStream): String {
+        val sizeBytes = readBytes(inputStream, 4)
+        val size = ByteBuffer.wrap(sizeBytes).order(ByteOrder.BIG_ENDIAN).int
+        val messageBytes = readBytes(inputStream, size)
+        return String(messageBytes, Charsets.UTF_8)
+    }
+
+    private suspend fun readInt(inputStream: InputStream): Int {
+        val bytes = readBytes(inputStream, 4)
+        return ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).int
+    }
+
+    private suspend fun readBytes(inputStream: InputStream, size: Int): ByteArray {
+        val buffer = ByteArray(size)
+        var bytesRead = 0
+        while (bytesRead < size) {
+            val count = inputStream.read(buffer, bytesRead, size - bytesRead)
+            if (count < 0) throw IOException("Unexpected end of stream")
+            bytesRead += count
+        }
+        return buffer
     }
 
     private fun processRemoteControlEvent(message: String) {

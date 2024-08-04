@@ -32,6 +32,7 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import androidx.camera.core.ImageProxy
+import kotlinx.coroutines.channels.Channel
 import java.nio.ByteBuffer
 
 
@@ -44,6 +45,11 @@ class YeYaCallActivity : AppCompatActivity() {
     private val coroutineScope = CoroutineScope(Dispatchers.IO + Job())
     private var isReconnecting = false
     private val reconnectDelay = 5000L // 5 seconds
+
+    private val imageQueue = Channel<ByteArray>(Channel.BUFFERED)
+    private val FPS = 15 // Adjust this value for desired frame rate
+    private val frameInterval = 1000L / FPS
+    private var lastFrameTime = 0L
 
     companion object {
         var instance: YeYaCallActivity? = null
@@ -87,6 +93,7 @@ class YeYaCallActivity : AppCompatActivity() {
         findViewById<ViewGroup>(R.id.root_layout).addView(previewView)
 
         setUpServerCamera()
+        startImageSending()
 
         Log.d(TAG, "YeYaCallActivity onCreate completed")
     }
@@ -107,7 +114,7 @@ class YeYaCallActivity : AppCompatActivity() {
                     it.setAnalyzer(cameraExecutor, ImageAnalyzer { bitmap ->
                         runOnUiThread {
                             previewView.setImageBitmap(bitmap)
-                            sendServerCameraImage(bitmap)
+                            onNewFrameProcessed(bitmap)
                         }
                     })
                 }
@@ -126,26 +133,48 @@ class YeYaCallActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun sendServerCameraImage(bitmap: Bitmap) {
-        coroutineScope.launch(Dispatchers.IO) {
-            try {
+    private fun onNewFrameProcessed(bitmap: Bitmap) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastFrameTime >= frameInterval) {
+            lastFrameTime = currentTime
+            coroutineScope.launch(Dispatchers.Default) {
                 val outputStream = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 50, outputStream)
-                val imageBytes = outputStream.toByteArray()
-                val imageSize = imageBytes.size
+                val imageData = outputStream.toByteArray()
+                imageQueue.send(imageData)
+            }
+        }
+    }
 
-                socketOutputStream?.let { output ->
+    private fun startImageSending() {
+        coroutineScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val imageData = imageQueue.receive()
+                    sendImageToClient(imageData)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in image sending loop", e)
+                }
+            }
+        }
+    }
+
+    private suspend fun sendImageToClient(imageData: ByteArray) {
+        try {
+            socketOutputStream?.let { output ->
+                withContext(Dispatchers.IO) {
                     // Add multiplexing identifier '4' for server camera
                     output.write("4".toByteArray())
-                    output.write(ByteBuffer.allocate(4).putInt(imageSize).array())
-                    output.write(imageBytes)
+                    val sizeBytes = ByteBuffer.allocate(4).putInt(imageData.size).array()
+                    output.write(sizeBytes)
+                    output.write(imageData)
                     output.flush()
-                    Log.d(TAG, "Sent server camera image: $imageSize bytes")
-                } ?: Log.e(TAG, "SocketOutputStream is null")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending server camera image", e)
-                reconnectToClient()
-            }
+                    Log.d(TAG, "Sent server camera image: ${imageData.size} bytes")
+                }
+            } ?: Log.e(TAG, "SocketOutputStream is null")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending server camera image", e)
+            reconnectToClient()
         }
     }
 
