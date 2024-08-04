@@ -1,6 +1,9 @@
 package com.example.yeya_ver2
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.graphics.Path
 import android.graphics.RectF
@@ -18,6 +21,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import kotlinx.coroutines.*
+import android.graphics.ImageFormat
+import android.hardware.camera2.*
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Size
+import android.view.Surface
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.channels.Channel
+import java.io.ByteArrayOutputStream
+
+
 
 
 class YeYaCallActivity : AppCompatActivity() {
@@ -38,6 +58,12 @@ class YeYaCallActivity : AppCompatActivity() {
     private var isVideoCallFullscreen = false
     private var originalX = 0
     private var originalY = 0
+
+    private lateinit var cameraManager: CameraManager
+    private var cameraDevice: CameraDevice? = null
+    private lateinit var imageReader: ImageReader
+    private val cameraHandler = Handler(HandlerThread("CameraThread").apply { start() }.looper)
+    private val serverCameraQueue = Channel<ByteArray>(Channel.BUFFERED)
 
 
 
@@ -60,6 +86,112 @@ class YeYaCallActivity : AppCompatActivity() {
 
         handleIntent(intent)
         Log.d(TAG, "YeYaCallActivity onCreate completed")
+        startServerCamera()
+    }
+
+    private fun startServerCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Camera permission not granted")
+            return
+        }
+
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = cameraManager.cameraIdList.find {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        }
+
+        if (cameraId != null) {
+            imageReader = ImageReader.newInstance(480, 480, ImageFormat.JPEG, 2)
+            imageReader.setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage()
+                image?.let {
+                    val buffer = it.planes[0].buffer
+                    val bytes = ByteArray(buffer.capacity())
+                    buffer.get(bytes)
+                    coroutineScope.launch {
+                        processAndEnqueueImage(bytes)
+                    }
+                    it.close()
+                }
+            }, cameraHandler)
+
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    cameraDevice = camera
+                    createCameraPreviewSession()
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    cameraDevice?.close()
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera error: $error")
+                    cameraDevice?.close()
+                }
+            }, cameraHandler)
+        }
+    }
+
+    private fun createCameraPreviewSession() {
+        val surface = imageReader.surface
+        cameraDevice?.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                captureRequest?.addTarget(surface)
+                session.setRepeatingRequest(captureRequest!!.build(), null, cameraHandler)
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Failed to configure camera session")
+            }
+        }, cameraHandler)
+    }
+
+    private suspend fun processAndEnqueueImage(imageBytes: ByteArray) {
+        withContext(Dispatchers.Default) {
+            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            val croppedBitmap = cropBitmapToSquare(bitmap)
+            val outputStream = ByteArrayOutputStream()
+            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+            val compressedBytes = outputStream.toByteArray()
+            serverCameraQueue.send(compressedBytes)
+            sendServerCameraImageToClient()
+        }
+    }
+
+    private fun cropBitmapToSquare(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val size = minOf(width, height)
+        val x = (width - size) / 2
+        val y = (height - size) / 2
+        val croppedBitmap = Bitmap.createBitmap(bitmap, x, y, size, size)
+        val scaledBitmap = Bitmap.createScaledBitmap(croppedBitmap, 480, 480, true)
+        croppedBitmap.recycle()
+        bitmap.recycle()
+        return scaledBitmap
+    }
+
+    private suspend fun sendServerCameraImageToClient() {
+        val imageData = serverCameraQueue.receive()
+        try {
+            SocketManager.getClientSocket()?.let { socket ->
+                if (!socket.isClosed) {
+                    val outputStream = socket.getOutputStream()
+                    val dataSize = imageData.size
+                    outputStream.write("4".toByteArray())
+                    outputStream.write(ByteBuffer.allocate(4).putInt(dataSize).array())
+                    outputStream.write(imageData)
+                    outputStream.flush()
+                    Log.d(TAG, "Server camera image sent (Size: $dataSize bytes)")
+                }
+            } ?: run {
+                Log.e(TAG, "Client socket is null")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending server camera image to client", e)
+        }
     }
 
     fun setClientScreenInfo(width: Int, height: Int, outputStream: OutputStream?) {
@@ -144,7 +276,7 @@ class YeYaCallActivity : AppCompatActivity() {
         }
     }
 
-// In YeYaCallActivity.kt
+
 
     private fun sendTouchEventToClient(message: String) {
         coroutineScope.launch {
