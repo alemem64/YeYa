@@ -856,6 +856,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                 val socket = SocketManager.getClientSocket()
                 val inputStream = BufferedInputStream(socket?.inputStream)
                 val headerBuffer = ByteArray(12)  // "CAMERA_IMAGE" 또는 "TOUCH_EVENT" 길이
+                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
 
                 while (isActive && socket?.isConnected == true) {
                     // 헤더 읽기
@@ -869,7 +870,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                         }
                         header == "TOUCH_EVENT" -> {
                             // 터치 이벤트 처리 (기존 로직)
-                            val message = readTouchEvent(inputStream)
+                            val message = reader.readLine() ?: break
                             processEvent(message)
                         }
                         else -> {
