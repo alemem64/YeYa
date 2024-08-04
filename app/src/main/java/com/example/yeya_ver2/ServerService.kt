@@ -54,6 +54,8 @@ class ServerService : Service() {
     private val cameraHandler = Handler(HandlerThread("CameraThread").apply { start() }.looper)
     private val serverCameraImageQueue = Channel<ByteArray>(Channel.BUFFERED)
     private var isServerCameraRecording = false
+    private var cameraSocket: Socket? = null
+    private val cameraPort = 8889 // 새로운 포트 번호
 
 
     override fun onCreate() {
@@ -127,6 +129,8 @@ class ServerService : Service() {
         }
     }
 
+
+
     private fun handleClient(client: Socket) {
         coroutineScope.launch {
             val reader = BufferedReader(InputStreamReader(client.inputStream))
@@ -157,7 +161,6 @@ class ServerService : Service() {
                         receiveScreenSharing(client)
 
 
-
                         startServerCameraSharing()
 
 
@@ -172,6 +175,8 @@ class ServerService : Service() {
             }
         }
     }
+
+
 
     private fun startServerCameraSharing() {
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -245,7 +250,8 @@ class ServerService : Service() {
                 val socket = SocketManager.getClientSocket()
                 if (socket != null && !socket.isClosed) {
                     val outputStream = socket.getOutputStream()
-                    outputStream.write(ByteBuffer.allocate(4).putInt(1).array()) // 데이터 타입 (1: 서버 카메라 이미지)
+                    // 카메라 이미지 데이터 타입을 나타내는 헤더 추가
+                    outputStream.write("CAMERA_IMAGE".toByteArray())
                     outputStream.write(ByteBuffer.allocate(4).putInt(imageData.size).array())
                     outputStream.write(imageData)
                     outputStream.flush()

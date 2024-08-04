@@ -133,6 +133,9 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private lateinit var serverVideoBoxFullscreen: ImageView
     private val serverCameraImageQueue = Channel<ByteArray>(Channel.BUFFERED)
 
+    private var cameraSocket: Socket? = null
+    private val cameraPort = 8889 // 서버와 동일한 포트 번호
+
 
 
 
@@ -355,6 +358,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
                     // Handle incoming click events
                     handleIncomingEvents()
 
+
+
                     // Set up VideoCall Overlay
                     Handler(Looper.getMainLooper()).post {
                         setupVideoCallOverlay()
@@ -375,6 +380,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
             }
         }
     }
+
+
 
 
 
@@ -846,22 +853,48 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
     private fun handleIncomingEvents() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val reader = BufferedReader(InputStreamReader(clientSocket?.inputStream))
-                while (isActive && clientSocket?.isConnected == true) {
-                    val message = reader.readLine() ?: break
-                    Log.d(TAG, "Received event: $message")
-                    processEvent(message)
+                val socket = SocketManager.getClientSocket()
+                val inputStream = BufferedInputStream(socket?.inputStream)
+                val headerBuffer = ByteArray(12)  // "CAMERA_IMAGE" 또는 "TOUCH_EVENT" 길이
+
+                while (isActive && socket?.isConnected == true) {
+                    // 헤더 읽기
+                    if (!readFully(inputStream, headerBuffer, 12)) break
+                    val header = String(headerBuffer)
+
+                    when {
+                        header == "CAMERA_IMAGE" -> {
+                            // 카메라 이미지 처리
+                            handleCameraImage(inputStream)
+                        }
+                        header == "TOUCH_EVENT" -> {
+                            // 터치 이벤트 처리 (기존 로직)
+                            val message = readTouchEvent(inputStream)
+                            processEvent(message)
+                        }
+                        else -> {
+                            Log.e(TAG, "Unknown header: $header")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming events", e)
-            } finally {
-                // Handle disconnection
-                withContext(Dispatchers.Main) {
-                    // Update UI or handle reconnection
-                }
             }
         }
     }
+
+    private suspend fun handleCameraImage(inputStream: InputStream) {
+        val sizeBuffer = ByteArray(4)
+        if (!readFully(inputStream, sizeBuffer, 4)) return
+        val imageSize = ByteBuffer.wrap(sizeBuffer).int
+
+        val imageData = ByteArray(imageSize)
+        if (!readFully(inputStream, imageData, imageSize)) return
+
+        Log.d(TAG, "Received server camera image: $imageSize bytes")
+        serverCameraImageQueue.send(imageData)
+    }
+
 
     private var currentPath: Path? = null
     private var gestureBuilder: GestureDescription.Builder? = null
