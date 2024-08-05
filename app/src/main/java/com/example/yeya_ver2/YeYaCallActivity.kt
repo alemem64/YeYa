@@ -59,7 +59,6 @@ class YeYaCallActivity : AppCompatActivity() {
     }
 
     private lateinit var cameraExecutor: ExecutorService
-    private lateinit var previewView: ImageView
     private val touchEventQueue = Channel<String>(Channel.BUFFERED)
 
 
@@ -86,14 +85,9 @@ class YeYaCallActivity : AppCompatActivity() {
         // Initialize cameraExecutor
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        // Initialize previewView
-        previewView = ImageView(this)
-        previewView.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
 
-        findViewById<ViewGroup>(R.id.root_layout).addView(previewView)
+
+
 
         setUpServerCamera()
         startImageSending()
@@ -117,7 +111,6 @@ class YeYaCallActivity : AppCompatActivity() {
                 .also {
                     it.setAnalyzer(cameraExecutor, ImageAnalyzer { bitmap ->
                         runOnUiThread {
-                            previewView.setImageBitmap(bitmap)
                             onNewFrameProcessed(bitmap)
                         }
                     })
