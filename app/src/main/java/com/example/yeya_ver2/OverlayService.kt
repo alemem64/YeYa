@@ -787,22 +787,33 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
 
                 while (isActive && clientSocket?.isConnected == true) {
                     val identifier = inputStream.read().toChar()
-                    when (identifier) {
-                        '0' -> processRemoteControlEvent(readMessage(inputStream))
-                        '2' -> processAudioEvent(readMessage(inputStream))
-                        '4' -> {
-                            val imageSize = readInt(inputStream)
-                            val imageData = readBytes(inputStream, imageSize)
-                            processServerCameraEvent(imageData)
-                        }
-                        else -> {
-                            if (identifier.toInt() != -1) {
-                                Log.e(TAG, "Unknown event type: $identifier")
-                            } else {
-                                Log.e(TAG, "End of stream reached")
-                                break
+                    try {
+                        when (identifier) {
+                            '0' -> processRemoteControlEvent(readMessage(inputStream, MAX_REMOTE_CONTROL_SIZE))
+                            '2' -> processAudioEvent(readMessage(inputStream, MAX_AUDIO_SIZE))
+                            '4' -> {
+                                val imageSize = readInt(inputStream)
+                                if (imageSize > MAX_IMAGE_SIZE) {
+                                    Log.e(TAG, "Image size too large: $imageSize bytes")
+                                    skipBytes(inputStream, imageSize)
+                                } else {
+                                    val imageData = readBytes(inputStream, imageSize)
+                                    processServerCameraEvent(imageData)
+                                }
+                            }
+                            else -> {
+                                if (identifier.toInt() != -1) {
+                                    Log.e(TAG, "Unknown event type: $identifier")
+                                    skipBytes(inputStream, 1024) // Skip potentially corrupted data
+                                } else {
+                                    Log.e(TAG, "End of stream reached")
+                                    break
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing event $identifier", e)
+                        // Continue to next event instead of breaking the loop
                     }
                 }
             } catch (e: Exception) {
@@ -815,10 +826,19 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private suspend fun readMessage(inputStream: InputStream): String {
+    private suspend fun readMessage(inputStream: InputStream, maxSize: Int): String {
         val sizeBytes = readBytes(inputStream, 4)
         val size = ByteBuffer.wrap(sizeBytes).order(ByteOrder.BIG_ENDIAN).int
+        if (size > maxSize) {
+            Log.e(TAG, "Message size too large: $size bytes")
+            skipBytes(inputStream, size)
+            throw IOException("Message size exceeds maximum allowed")
+        }
         val messageBytes = readBytes(inputStream, size)
+        val checksum = inputStream.read()
+        if (checksum != messageBytes.sum() and 0xFF) {
+            throw IOException("Checksum mismatch")
+        }
         return String(messageBytes, Charsets.UTF_8)
     }
 
@@ -826,6 +846,7 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         val bytes = readBytes(inputStream, 4)
         return ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).int
     }
+
 
     private suspend fun readBytes(inputStream: InputStream, size: Int): ByteArray {
         val buffer = ByteArray(size)
@@ -837,6 +858,22 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
         return buffer
     }
+
+    private suspend fun skipBytes(inputStream: InputStream, size: Int) {
+        var bytesSkipped = 0
+        while (bytesSkipped < size) {
+            val skipped = inputStream.skip((size - bytesSkipped).toLong())
+            if (skipped < 0) throw IOException("Unexpected end of stream")
+            bytesSkipped += skipped.toInt()
+        }
+    }
+
+    companion object {
+        const val MAX_REMOTE_CONTROL_SIZE = 1024 // 1KB
+        const val MAX_AUDIO_SIZE = 1024 * 1024 // 1MB
+        const val MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
+    }
+
 
     private fun processRemoteControlEvent(message: String) {
         val parts = message.split("|")

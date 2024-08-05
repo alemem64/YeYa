@@ -60,6 +60,8 @@ class YeYaCallActivity : AppCompatActivity() {
 
     private lateinit var cameraExecutor: ExecutorService
     private val touchEventQueue = Channel<String>(Channel.BUFFERED)
+    private var lastEventTime = 0L
+    private val MIN_EVENT_INTERVAL = 50L // 50ms
 
 
 
@@ -306,10 +308,15 @@ class YeYaCallActivity : AppCompatActivity() {
 
 
     private fun sendTouchEventToClient(message: String) {
-        coroutineScope.launch {
-            touchEventQueue.send(message)
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastEventTime >= MIN_EVENT_INTERVAL) {
+            lastEventTime = currentTime
+            coroutineScope.launch {
+                touchEventQueue.send(message)
+            }
         }
     }
+
 
     private fun startTouchEventSending() {
         coroutineScope.launch(Dispatchers.IO) {
@@ -318,18 +325,24 @@ class YeYaCallActivity : AppCompatActivity() {
                     val message = touchEventQueue.receive()
                     socketOutputStream?.let { outputStream ->
                         withContext(Dispatchers.IO) {
-                            // Add multiplexing identifier '0' for remote control
-                            outputStream.write("0".toByteArray())
                             val messageBytes = message.toByteArray(Charsets.UTF_8)
+                            if (messageBytes.size > 1024) {
+                                Log.w(TAG, "Touch event message too large, skipping")
+                                return@withContext
+                            }
+                            val checksum = messageBytes.sum()
+                            outputStream.write("0".toByteArray())
                             val sizeBytes = ByteBuffer.allocate(4).putInt(messageBytes.size).array()
                             outputStream.write(sizeBytes)
                             outputStream.write(messageBytes)
+                            outputStream.write(checksum)
                             outputStream.flush()
                             Log.d(TAG, "Sent touch event: $message")
                         }
                     } ?: Log.e(TAG, "SocketOutputStream is null")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error sending touch event to client", e)
+                    delay(1000) // 오류 발생 시 1초 대기
                     reconnectToClient()
                 }
             }
