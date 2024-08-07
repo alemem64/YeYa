@@ -1112,6 +1112,8 @@ class OverlayService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    
+
     private fun saveBitmapToGallery(bitmap: Bitmap) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val imageFileName = "YEYA_Screenshot_$timeStamp.jpg"
